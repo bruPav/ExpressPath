@@ -1,0 +1,135 @@
+source_tsv: "your_rnaseq_data.tsv"
+factors:
+  cell_lines:
+    - id: "A549"
+      short: "A"
+    - id: "E6"
+      short: "E"
+  time_points:
+    - id: "mock"
+      label: "mock"
+      short: "m"
+    - id: "1h"
+      label: "1h"
+      short: "1"
+    - id: "3h"
+      label: "3h"
+      short: "3"
+  treatment:
+    id: "Ad26"
+    label: "Ad26"
+  replicates: 3
+column_map:
+  A_m-1:
+    cell_line: "A549"
+    time: "mock"
+    replicate: 1
+    sample_id: "A549_mock_1"
+    batch: "1"
+  A_m_2:
+    cell_line: "A549"
+    time: "mock"
+    replicate: 2
+    sample_id: "A549_mock_2"
+    batch: "1"
+  A_m_3:
+    cell_line: "A549"
+    time: "mock"
+    replicate: 3
+    sample_id: "A549_mock_3"
+    batch: "2"
+  A_A1-1:
+    cell_line: "A549"
+    time: "1h"
+    replicate: 1
+    sample_id: "A549_Ad26_1h_1"
+    batch: "1"
+  A_A-1_2:
+    cell_line: "A549"
+    time: "1h"
+    replicate: 2
+    sample_id: "A549_Ad26_1h_2"
+    batch: "1"
+  A_A-1_3:
+    cell_line: "A549"
+    time: "1h"
+    replicate: 3
+    sample_id: "A549_Ad26_1h_3"
+    batch: "2"
+  A_A-3_1:
+    cell_line: "A549"
+    time: "3h"
+    replicate: 1
+    sample_id: "A549_Ad26_3h_1"
+    batch: "1"
+  A_A-3_2:
+    cell_line: "A549"
+    time: "3h"
+    replicate: 2
+    sample_id: "A549_Ad26_3h_2"
+    batch: "1"
+  A_A-3_3:
+    cell_line: "A549"
+    time: "3h"
+    replicate: 3
+    sample_id: "A549_Ad26_3h_3"
+    batch: "2"
+  E_m_1:
+    cell_line: "E6"
+    time: "mock"
+    replicate: 1
+    sample_id: "E6_mock_1"
+    batch: "1"
+  E_m_2:
+    cell_line: "E6"
+    time: "mock"
+    replicate: 2
+    sample_id: "E6_mock_2"
+    batch: "1"
+  E_m_3:
+    cell_line: "E6"
+    time: "mock"
+    replicate: 3
+    sample_id: "E6_mock_3"
+    batch: "2"
+  E_A-1_1:
+    cell_line: "E6"
+    time: "1h"
+    replicate: 1
+    sample_id: "E6_Ad26_1h_1"
+    batch: "1"
+  E_A-1_2:
+    cell_line: "E6"
+    time: "1h"
+    replicate: 2
+    sample_id: "E6_Ad26_1h_2"
+    batch: "1"
+  E_A-1_3:
+    cell_line: "E6"
+    time: "1h"
+    replicate: 3
+    sample_id: "E6_Ad26_1h_3"
+    batch: "2"
+  E_A-3_1:
+    cell_line: "E6"
+    time: "3h"
+    replicate: 1
+    sample_id: "E6_Ad26_3h_1"
+    batch: "1"
+  E_A-3_2:
+    cell_line: "E6"
+    time: "3h"
+    replicate: 2
+    sample_id: "E6_Ad26_3h_2"
+    batch: "1"
+  E_A-3_3:
+    cell_line: "E6"
+    time: "3h"
+    replicate: 3
+    sample_id: "E6_Ad26_3h_3"
+    batch: "2"
+comparisons:
+  within_cell_line: true
+  progression: true
+  between_cell_lines: true
+  interactions: true

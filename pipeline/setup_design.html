@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RNA-Seq Pipeline — Experimental Design Setup</title>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+.container { max-width: 1100px; margin: 0 auto; background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.12); padding: 24px; }
+h1 { font-size: 22px; margin: 0 0 4px 0; }
+.subtitle { color: #666; font-size: 13px; margin-bottom: 20px; }
+.section { margin-bottom: 20px; padding: 16px; background: #fafafa; border-radius: 6px; border: 1px solid #e8e8e8; }
+.section h2 { font-size: 15px; margin: 0 0 10px 0; color: #333; }
+.row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 8px; }
+.field { display: flex; flex-direction: column; }
+.field label { font-size: 12px; color: #555; margin-bottom: 3px; font-weight: 500; }
+.field input { padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; width: 180px; }
+.field select { padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; min-width: 220px; background: #fff; }
+.field small { font-size: 11px; color: #888; margin-top: 2px; }
+.btn { padding: 7px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; }
+.btn-primary { background: #2563eb; color: #fff; }
+.btn-primary:hover { background: #1d4ed8; }
+.btn-outline { background: #fff; border: 1px solid #ccc; color: #333; }
+.btn-outline:hover { background: #f0f0f0; }
+.btn-danger { background: #dc2626; color: #fff; }
+.btn-success { background: #16a34a; color: #fff; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+th { background: #f0f0f0; padding: 8px 6px; text-align: left; font-size: 12px; border-bottom: 2px solid #ddd; position: sticky; top: 0; }
+td { padding: 5px 6px; border-bottom: 1px solid #eee; }
+tr.unmatched td { background: #fff3cd; }
+tr.unmatched select { border-color: #dc2626; }
+.validation { margin-top: 12px; font-size: 13px; padding: 10px; border-radius: 4px; }
+.validation.ok { background: #ecfdf5; color: #166534; border: 1px solid #bbf7d0; }
+.validation.warn { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
+.validation.err { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+.validation p { margin: 2px 0; }
+.hidden { display: none; }
+#tsvName { font-size: 12px; color: #666; margin-left: 10px; }
+.scroll-table { max-height: 500px; overflow-y: auto; border: 1px solid #e8e8e8; border-radius: 4px; }
+.sample-id-input { width: 160px; }
+.batch-input { width: 100px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>RNA-Seq Pipeline — Experimental Design Setup</h1>
+  <p class="subtitle">Define your experiment and map TSV columns to samples. Download design.yaml when done.</p>
+
+  <!-- Step 1: Define experiment -->
+  <div class="section">
+    <h2>1. Define Your Experiment</h2>
+    <div class="row">
+      <div class="field">
+        <label>Cell lines (comma-separated)</label>
+        <input type="text" id="cellLines" value="A549, E6" placeholder="e.g. HeLa, MCF7">
+      </div>
+      <div class="field">
+        <label>Time points (comma, first=baseline)</label>
+        <input type="text" id="timePoints" value="mock, 1h, 3h" placeholder="e.g. mock, 30m, 1h, 3h, 6h">
+      </div>
+      <div class="field">
+        <label>Treatment ID (column prefix)</label>
+        <input type="text" id="treatId" value="Ad26" placeholder="e.g. IFNg">
+      </div>
+      <div class="field">
+        <label>Treatment label</label>
+        <input type="text" id="treatLabel" value="Ad26" placeholder="e.g. Interferon-gamma">
+      </div>
+      <div class="field">
+        <label>Replicates</label>
+        <input type="number" id="replicates" value="3" min="1" max="20" style="width:70px">
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 2: TSV file (optional) -->
+  <div class="section">
+    <h2>2. Select Your RNA-Seq TSV File (optional)</h2>
+    <div class="row">
+      <div class="field">
+        <label>TSV file — loads column names into dropdowns</label>
+        <input type="file" id="tsvFile" accept=".tsv,.txt,.csv">
+        <small>Skip this to fill TSV column names manually</small>
+      </div>
+      <div class="field" style="align-self: flex-end">
+        <button class="btn btn-primary" onclick="generateTable()">Generate Table</button>
+      </div>
+    </div>
+    <span id="tsvName"></span>
+  </div>
+
+  <!-- Step 3: Mapping table -->
+  <div class="section hidden" id="tableSection">
+    <h2>3. Map TSV Columns to Samples</h2>
+    <p style="font-size:12px;color:#666;margin:0 0 8px 0">
+      For each row, select the matching TSV column name from the dropdown.
+      Best guesses are pre-selected. Yellow rows need manual selection.
+    </p>
+    <div class="row" style="margin-bottom:8px">
+      <button class="btn btn-outline" onclick="autoFill()">Auto-Fill Best Matches</button>
+      <button class="btn btn-outline" onclick="clearUnmatched()">Clear Unmatched</button>
+      <span style="display:flex;align-items:center;gap:6px;margin-left:12px">
+        Batch all: <input type="text" id="batchAll" placeholder="e.g. seq_run_1" style="width:110px">
+        <button class="btn btn-outline btn-sm" onclick="setAllBatches()">Apply</button>
+      </span>
+    </div>
+    <div class="scroll-table">
+      <table id="mappingTable">
+        <thead><tr>
+          <th>#</th><th>Cell Line</th><th>Time</th><th>Rep</th>
+          <th>TSV Column</th><th>Batch</th><th>Sample ID</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="validation" id="validation"></div>
+  </div>
+
+  <!-- Step 4: Download -->
+  <div class="section hidden" id="downloadSection">
+    <h2>4. Download and Save Design File</h2>
+    <p style="font-size:13px;color:#2563eb;font-weight:500" id="instructions">
+      Save this file as <code>data/design.yaml</code> in your project folder.
+      Make sure <code id="tsvPathNote"></code> is also in the <code>data/</code> folder.
+    </p>
+    <button class="btn btn-success" onclick="downloadDesign()">Download design.yaml</button>
+  </div>
+</div>
+
+<script>
+let tsvColumns = [];
+let tsvFileName = '';
+
+// ─── File reader: extract header column names from TSV ───
+document.getElementById('tsvFile').addEventListener('change', function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  tsvFileName = file.name;
+  document.getElementById('tsvName').textContent = 'Loaded: ' + file.name;
+  const reader = new FileReader();
+  reader.onload = function(ev) {
+    const firstLine = ev.target.result.split('\n')[0];
+    tsvColumns = firstLine.split('\t').map(c => c.trim()).filter(c => c);
+  };
+  reader.readAsBinaryString(file.slice(0, 1024 * 10)); // read first 10KB only
+});
+
+// ─── Parse user input ───
+function parseList(str) { return str.split(',').map(s => s.trim()).filter(s => s); }
+
+function getDesign() {
+  return {
+    cellLines: parseList(document.getElementById('cellLines').value),
+    timePoints: parseList(document.getElementById('timePoints').value),
+    treatId: document.getElementById('treatId').value.trim(),
+    treatLabel: document.getElementById('treatLabel').value.trim(),
+    replicates: parseInt(document.getElementById('replicates').value) || 3
+  };
+}
+
+// ─── Generate mapping table ───
+function generateTable() {
+  const d = getDesign();
+  if (!d.cellLines.length || !d.timePoints.length) {
+    alert('Please fill in cell lines and time points.');
+    return;
+  }
+
+  // Build dropdown options from all data-like TSV columns (no suffix assumption)
+  const metaCols = new Set(["gene_name", "nr_symbol", ""]);
+  let dataCols = [];
+  if (tsvColumns.length) {
+    dataCols = tsvColumns.filter(c => !c.endsWith('_FPKM') && !metaCols.has(c));
+    document.getElementById('tsvName').textContent =
+      `${tsvFileName} — ${dataCols.length} data columns found`;
+  } else {
+    document.getElementById('tsvName').textContent =
+      'No TSV loaded — map columns manually';
+  }
+
+  const tbody = document.querySelector('#mappingTable tbody');
+  tbody.innerHTML = '';
+  let rowIdx = 0;
+
+  for (const cl of d.cellLines) {
+    for (const tp of d.timePoints) {
+      for (let rep = 1; rep <= d.replicates; rep++) {
+        rowIdx++;
+        const isMock = (tp === d.timePoints[0]);
+        const autoId = isMock
+          ? `${cl}_${tp}_${rep}`
+          : `${cl}_${d.treatId}_${tp}_${rep}`;
+
+        // Keyword-based auto-match
+        const keywords = [cl, tp, d.treatId, String(rep)].map(k => k.toLowerCase());
+        let bestI = -1, bestScore = 0;
+        dataCols.forEach((c, i) => {
+          const lower = c.toLowerCase();
+          let score = 0;
+          if (lower.includes(keywords[0])) score += 2;  // cell line match = strong
+          if (lower.includes(keywords[1])) score += 2;  // time match = strong
+          if (!isMock && lower.includes(keywords[2])) score += 1;  // treatment match
+          if (lower.includes(keywords[3])) score += 1;  // rep match
+          if (score > bestScore) { bestScore = score; bestI = i; }
+        });
+        // Need at least 3 score to auto-match (cell+time+something)
+        const matchIdx = bestScore >= 3 ? bestI : -1;
+
+        const tr = document.createElement('tr');
+        tr.dataset.rowIdx = rowIdx;
+        tr.dataset.cellLine = cl;
+        tr.dataset.time = tp;
+        tr.dataset.rep = rep;
+
+        let dropdownHTML = '<select class="col-select"><option value="">??? — select column</option>';
+        dataCols.forEach((c, i) => {
+          dropdownHTML += `<option value="${c}" ${i === matchIdx ? 'selected' : ''}>${c}</option>`;
+        });
+        dropdownHTML += '</select>';
+
+        tr.innerHTML = `
+          <td>${rowIdx}</td>
+          <td><b>${cl}</b></td>
+          <td>${tp}</td>
+          <td>${rep}</td>
+          <td>${dropdownHTML}</td>
+          <td><input type="text" class="batch-input" value="" placeholder="batch name"></td>
+          <td><input type="text" class="sample-id-input" value="${autoId}"></td>
+        `;
+
+        if (matchIdx === -1) tr.classList.add('unmatched');
+        tbody.appendChild(tr);
+      }
+    }
+  }
+
+  document.getElementById('tableSection').classList.remove('hidden');
+  document.getElementById('downloadSection').classList.remove('hidden');
+  document.getElementById('tsvPathNote').textContent = tsvFileName ? 'data/' + tsvFileName : 'your_rnaseq_data.tsv';
+  updateValidation();
+}
+
+// ─── Set all batches ───
+function setAllBatches() {
+  const val = document.getElementById('batchAll').value.trim();
+  if (!val) return;
+  document.querySelectorAll('.batch-input').forEach(inp => { inp.value = val; });
+}
+
+// ─── Auto-fill best matches (keyword-based) ───
+function autoFill() {
+  const d = getDesign();
+  const selects = document.querySelectorAll('.col-select');
+  const used = new Set();
+
+  selects.forEach(sel => {
+    if (sel.value) { used.add(sel.value); return; }
+    const tr = sel.closest('tr');
+    const cl = tr.dataset.cellLine.toLowerCase();
+    const tp = tr.dataset.time.toLowerCase();
+    const rep = tr.dataset.rep;
+    const isMock = (tr.dataset.time === d.timePoints[0]);
+
+    let bestI = -1, bestScore = 0;
+    for (let i = 0; i < sel.options.length; i++) {
+      const opt = sel.options[i];
+      if (!opt.value || used.has(opt.value)) continue;
+      const lower = opt.value.toLowerCase();
+      let score = 0;
+      if (lower.includes(cl)) score += 2;
+      if (lower.includes(tp)) score += 2;
+      if (!isMock && lower.includes(d.treatId.toLowerCase())) score += 1;
+      if (lower.includes(String(rep))) score += 1;
+      if (score > bestScore) { bestScore = score; bestI = i; }
+    }
+    if (bestI > 0 && bestScore >= 3) {
+      sel.selectedIndex = bestI;
+      used.add(sel.value);
+      tr.classList.remove('unmatched');
+    }
+  });
+}
+
+function clearUnmatched() {
+  const selects = document.querySelectorAll('.col-select');
+  selects.forEach(sel => {
+    const tr = sel.closest('tr');
+    if (tr.classList.contains('unmatched')) sel.value = '';
+  });
+}
+
+// ─── Validation ───
+document.addEventListener('input', function(e) {
+  if (e.target.classList.contains('batch-input') || e.target.classList.contains('col-select')) {
+    updateValidation();
+  }
+});
+document.addEventListener('change', function(e) {
+  if (e.target.classList.contains('col-select')) updateValidation();
+});
+
+function updateValidation() {
+  const d = getDesign();
+  const selects = document.querySelectorAll('.col-select');
+  const used = new Set();
+  let unfilled = 0;
+  const mockStatus = {};
+
+  for (const cl of d.cellLines) mockStatus[cl] = false;
+
+  selects.forEach(sel => {
+    const tr = sel.closest('tr');
+    if (sel.value) {
+      used.add(sel.value);
+      tr.classList.remove('unmatched');
+    } else {
+      unfilled++;
+      tr.classList.add('unmatched');
+    }
+    if (tr.dataset.time === d.timePoints[0]) {
+      mockStatus[tr.dataset.cellLine] = mockStatus[tr.dataset.cellLine] || !!sel.value;
+    }
+  });
+
+  const duplicates = [];
+  const seen = {};
+  selects.forEach(sel => {
+    if (!sel.value) return;
+    seen[sel.value] = (seen[sel.value] || 0) + 1;
+  });
+  for (const [col, count] of Object.entries(seen)) {
+    if (count > 1) duplicates.push(col);
+  }
+
+  const noMock = d.cellLines.filter(cl => !mockStatus[cl]);
+
+  const div = document.getElementById('validation');
+  let html = '';
+  let cls = 'ok';
+
+  // Column count check
+  const slotCount = selects.length;
+  if (tsvColumns.length > 0) {
+    const dataCols = tsvColumns.filter(c => !c.endsWith('_FPKM') && !c.startsWith('gene_'));
+    if (dataCols.length < slotCount) {
+      html += `<p>⚠ You have ${dataCols.length} data columns but need ${slotCount} slots. Some columns may need to serve multiple rows.</p>`;
+      cls = 'warn';
+    }
+  }
+
+  if (unfilled > 0) { html += `<p>⚠ ${unfilled} slot(s) unassigned.</p>`; cls = 'warn'; }
+  if (duplicates.length) { html += `<p>⚠ Column assigned twice: ${duplicates.join(', ')}</p>`; cls = 'err'; }
+  if (noMock.length) { html += `<p>⚠ Missing mock/baseline: ${noMock.join(', ')} — DESeq2 needs a reference per cell line.</p>`; cls = 'err'; }
+
+  // Check empty batch fields
+  const emptyBatches = document.querySelectorAll('.batch-input');
+  let missingBatches = 0;
+  emptyBatches.forEach(inp => { if (!inp.value.trim()) missingBatches++; });
+  if (missingBatches > 0 && unfilled === 0) {
+    html += `<p>⚠ ${missingBatches} batch field(s) empty. Fill batch names before downloading.</p>`;
+    if (cls === 'ok') cls = 'warn';
+  }
+
+  if (!html) html = '<p>✓ All slots filled, all batches set, mock present per cell line. Ready to download.</p>';
+
+  div.className = 'validation ' + cls;
+  div.innerHTML = html;
+}
+
+// ─── Generate YAML ───
+function toYaml(obj, indent = 0) {
+  const pad = '  '.repeat(indent);
+  let out = '';
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      if (typeof item === 'object' && !Array.isArray(item)) {
+        out += pad + '- ' + toYaml(item, indent + 1).trimStart().replace(/^  /, '');
+      } else {
+        out += pad + '- ' + JSON.stringify(item) + '\n';
+      }
+    }
+  } else if (typeof obj === 'object' && obj !== null) {
+    for (const [k, v] of Object.entries(obj)) {
+      if (v === null || v === undefined) continue;
+      if (typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 1 && typeof Object.values(v)[0] !== 'object') {
+        out += pad + `${k}: ${JSON.stringify(Object.values(v)[0])}\n`;
+      } else if (typeof v === 'object') {
+        out += pad + k + ':\n' + toYaml(v, indent + 1);
+      } else if (typeof v === 'boolean') {
+        out += pad + k + ': ' + (v ? 'true' : 'false') + '\n';
+      } else if (typeof v === 'number') {
+        out += pad + k + ': ' + v + '\n';
+      } else {
+        out += pad + k + ': ' + JSON.stringify(v) + '\n';
+      }
+    }
+  } else {
+    out += pad + JSON.stringify(obj) + '\n';
+  }
+  return out;
+}
+
+function downloadDesign() {
+  const d = getDesign();
+  const selects = document.querySelectorAll('.col-select');
+
+  // Build column_map from table
+  const columnMap = {};
+  selects.forEach(sel => {
+    if (!sel.value) return;
+    const tr = sel.closest('tr');
+    const batch = tr.querySelector('.batch-input').value.trim();
+    const sampleId = tr.querySelector('.sample-id-input').value.trim();
+    columnMap[sel.value] = {
+      cell_line: tr.dataset.cellLine,
+      time: tr.dataset.time,
+      replicate: parseInt(tr.dataset.rep),
+      sample_id: sampleId,
+      batch: batch
+    };
+  });
+
+  const clList = d.cellLines.map(c => {
+    return {id: c, short: (/mock/i.test(c) ? 'm' : c[0].toUpperCase())};
+  });
+
+  const tpList = d.timePoints.map(t => {
+    const s = t === d.timePoints[0] ? 'm' : (t[0]);
+    return {id: t, label: t, short: s};
+  });
+
+  const design = {
+    source_tsv: tsvFileName || 'your_rnaseq_data.tsv',
+    factors: {
+      cell_lines: clList,
+      time_points: tpList,
+      treatment: {id: d.treatId, label: d.treatLabel},
+      replicates: d.replicates
+    },
+    column_map: columnMap,
+    comparisons: {
+      within_cell_line: true,
+      progression: true,
+      between_cell_lines: true,
+      interactions: true
+    }
+  };
+
+  const yamlStr = toYaml(design);
+  const blob = new Blob([yamlStr], {type: 'application/x-yaml'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'design.yaml';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+</script>
+</body>
+</html>

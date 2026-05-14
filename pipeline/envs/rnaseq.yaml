@@ -1,0 +1,29 @@
+name: rnaseq
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - r-base=4.3
+  # DESeq2
+  - bioconductor-deseq2
+  - r-ggplot2
+  - r-pheatmap
+  - r-rcolorbrewer
+  - r-dplyr
+  - r-ggrepel
+  - r-ashr
+  # Pathway analysis
+  - bioconductor-clusterprofiler
+  - bioconductor-org.hs.eg.db
+  - bioconductor-gsva
+  - bioconductor-pathview
+  # Report
+  - r-htmltools
+  - r-base64enc
+  - r-jsonlite
+  - r-msigdbr
+  - r-yaml
+  # Extract counts
+  - python >=3.9
+  - pyyaml

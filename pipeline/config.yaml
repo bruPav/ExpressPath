@@ -1,0 +1,19 @@
+# ─── RNA-Seq Time Course Analysis Pipeline ───
+# Design-driven: setup your experiment with setup_design.html
+# Output: DESeq2 results + GSEA pathway analysis + interactive HTML report
+
+# ─── Experiment Design ───
+design: "../data/design.yaml"                        # Path to your design file (set by setup_design.html)
+
+# ─── Run ID ───
+run_id: "auto"                                       # "auto" = YYYYMMDD_HHMMSS timestamp, or a custom name
+
+# ─── Filtering ───
+count_filter_threshold: 10                           # Min total count across all samples to keep a gene
+
+# ─── DESeq2 ───
+pvalue_threshold: 0.05                               # alpha for significance
+
+# ─── GSEA ───
+gsea_min_set_size: 15                                # Min genes in a KEGG pathway
+gsea_max_set_size: 500                               # Max genes in a KEGG pathway

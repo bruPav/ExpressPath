@@ -1,0 +1,143 @@
+#!/usr/bin/env snakemake
+#
+# RNA-Seq Time Course Analysis Pipeline
+# DESeq2 → GSEA → Pathview → Interactive HTML Report
+#
+
+import os
+import json
+import sys
+import yaml
+from datetime import datetime
+
+# ─── Load design ───
+design_path = config.get("design", "../data/design.yaml")
+if not os.path.exists(design_path):
+    sys.exit(f"ERROR: {design_path} not found.\n"
+             "  Open setup_design.html, browse for your TSV file, map columns, and\n"
+             "  download the design.yaml file to your data/ folder.")
+with open(design_path) as f:
+    design = yaml.safe_load(f)
+design_json = json.dumps(design)
+
+# ─── Read TSV path from design (single source of truth) ───
+tsv_filename = design.get("source_tsv")
+if not tsv_filename:
+    sys.exit(f"ERROR: {design_path} has no 'source_tsv' field.\n"
+             "  Open setup_design.html, browse for your TSV file, map columns, and\n"
+             "  re-download design.yaml. The new version will include the TSV path.")
+input_tsv_path = f"../data/{tsv_filename}"
+if not os.path.exists(input_tsv_path):
+    sys.exit(f"ERROR: {input_tsv_path} not found.\n"
+             f"  Make sure '{tsv_filename}' is in your data/ folder alongside design.yaml.")
+
+# ─── Resolve run_id ───
+run_id_raw = config.get("run_id", "auto")
+if run_id_raw == "auto":
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+else:
+    run_id = run_id_raw
+
+out_dir = f"../results/{run_id}"
+
+# ─── Resolved params ───
+count_filter_val = config.get("count_filter_threshold", 10)
+pvalue_val       = config.get("pvalue_threshold", 0.05)
+gsea_min_val     = config.get("gsea_min_set_size", 15)
+gsea_max_val     = config.get("gsea_max_set_size", 500)
+
+# ─── Paths ───
+out_dir         = f"../results/{run_id}"
+counts_file     = f"{out_dir}/counts_matrix.tsv"
+metadata_file   = f"{out_dir}/metadata.tsv"
+annot_file      = f"{out_dir}/gene_annotations.tsv"
+combined_file   = f"{out_dir}/combined_results.tsv"
+signif_file     = f"{out_dir}/signif_lrt.tsv"
+signif_fc_file  = f"{out_dir}/signif_lrt_foldchange1.tsv"
+vst_file        = f"{out_dir}/vst_normalized_counts.tsv"
+
+pathway_dir     = f"{out_dir}/pathway"
+gsea_kegg_file  = f"{pathway_dir}/gsea_kegg_signif.tsv"
+gsea_go_file    = f"{pathway_dir}/gsea_go_signif.tsv"
+gsva_file       = f"{pathway_dir}/gsva_scores.tsv"
+gsva_diff_file  = f"{pathway_dir}/gsva_diff_results.tsv"
+gsea_dotplot    = f"{pathway_dir}/gsea_dotplot_kegg.pdf"
+gsva_dotplot    = f"{pathway_dir}/gsva_diff_dotplot.pdf"
+report_file     = f"{pathway_dir}/interactive_report.html"
+
+# ─── Default target ───
+rule all:
+    input:
+        report_file
+
+
+# ─── Step 1: Extract count matrix, metadata, gene annotations ───
+rule extract_counts:
+    input:
+        tsv = input_tsv_path
+    output:
+        counts  = counts_file,
+        meta    = metadata_file,
+        annot   = annot_file
+    params:
+        count_filter = count_filter_val,
+        design = design_json
+    conda:
+        "envs/rnaseq.yaml"
+    shell:
+        "python scripts/01_extract_counts.py {input.tsv} --out-dir {out_dir} --count-filter {params.count_filter}"
+
+
+# ─── Step 2: DESeq2 analysis (LRT + pairwise contrasts) ───
+rule deseq2_analysis:
+    input:
+        counts  = counts_file,
+        meta    = metadata_file,
+        annot   = annot_file
+    output:
+        combined   = combined_file,
+        signif     = signif_file,
+        signif_fc  = signif_fc_file,
+        vst        = vst_file
+    params:
+        pvalue = pvalue_val,
+        design = design_json
+    conda:
+        "envs/rnaseq.yaml"
+    shell:
+        "Rscript scripts/02_deseq2_analysis.R {out_dir}"
+
+
+# ─── Step 3: Pathway analysis (GSEA + Pathview + GSVA) ───
+rule pathway_analysis:
+    input:
+        combined = combined_file
+    output:
+        gsea_kegg   = gsea_kegg_file,
+        gsea_go     = gsea_go_file,
+        gsva        = gsva_file,
+        gsva_diff   = gsva_diff_file,
+        gsea_dp     = gsea_dotplot,
+        gsva_dp     = gsva_dotplot
+    params:
+        design = design_json
+    conda:
+        "envs/rnaseq.yaml"
+    shell:
+        "Rscript scripts/03_pathway_analysis.R {out_dir} {pathway_dir}"
+
+
+# ─── Step 4: Interactive HTML report ───
+rule interactive_report:
+    input:
+        combined   = combined_file,
+        gsea_kegg  = gsea_kegg_file,
+        gsea_go    = gsea_go_file
+    output:
+        report = report_file
+    params:
+        design = design_json
+    conda:
+        "envs/rnaseq.yaml"
+    shell:
+        "Rscript scripts/04_interactive_report.R {out_dir} {pathway_dir}"
