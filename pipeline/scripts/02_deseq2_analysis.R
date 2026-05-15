@@ -324,8 +324,9 @@ cat(sprintf("Wrote signif_lrt_foldchange1.tsv (%d genes with padj < %.2g & |log2
 cat("\n=== Summary Statistics ===\n")
 cat(sprintf("\nTotal genes tested: %d\n", nrow(combined)))
 cat(sprintf("LRT significant (padj < %.2g): %d (%.1f%%)\n",
+            alpha_val,
             sum(combined$lrt_signif),
-            100 * sum(combined$lrt_signif) / nrow(combined), alpha_val))
+            100 * sum(combined$lrt_signif) / nrow(combined)))
 cat(sprintf("LRT + |log2FC| > 1: %d\n\n", nrow(signif_fc1)))
 
 cat(sprintf("Significant genes per contrast (padj < %.2g):\n", alpha_val))
