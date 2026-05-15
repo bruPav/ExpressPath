@@ -8,10 +8,14 @@
 if (exists("snakemake")) {
   results_dir <- dirname(dirname(snakemake@output[["gsea_kegg"]]))
   out_dir     <- dirname(snakemake@output[["gsea_kegg"]])
+  gsea_min    <- 15
+  gsea_max    <- 500
 } else {
   args <- commandArgs(trailingOnly = TRUE)
   results_dir <- if (length(args) >= 1) args[1] else "results"
   out_dir     <- if (length(args) >= 2) args[2] else file.path(results_dir, "pathway")
+  gsea_min    <- if (length(args) >= 3) as.integer(args[3]) else 15L
+  gsea_max    <- if (length(args) >= 4) as.integer(args[4]) else 500L
 }
 
 suppressPackageStartupMessages({
@@ -90,7 +94,7 @@ for (cname in contrasts) {
   # --- KEGG GSEA ---
   kegg_res <- tryCatch({
     gseKEGG(geneList = gene_list, organism = "hsa", pvalueCutoff = 0.05,
-            minGSSize = 15, maxGSSize = 500, eps = 0, seed = 42)
+            minGSSize = gsea_min, maxGSSize = gsea_max, eps = 0, seed = 42)
   }, error = function(e) { cat("KEGG-err "); NULL })
 
   if (!is.null(kegg_res) && nrow(kegg_res@result) > 0) {
@@ -105,7 +109,7 @@ for (cname in contrasts) {
   # --- GO BP GSEA ---
   go_res <- tryCatch({
     gseGO(geneList = gene_list, OrgDb = org.Hs.eg.db, ont = "BP",
-          pvalueCutoff = 0.05, minGSSize = 15, maxGSSize = 500,
+          pvalueCutoff = 0.05, minGSSize = gsea_min, maxGSSize = gsea_max,
           eps = 0, seed = 42)
   }, error = function(e) { cat("GO-err "); NULL })
 
@@ -310,7 +314,7 @@ cat(sprintf("  Expression matrix: %d genes x %d samples\n",
 # Run GSVA (Hallmark)
 cat("Running GSVA (Hallmark)...\n")
 gsva_param <- gsvaParam(exprData = vst_entrez, geneSets = h_gene_sets,
-                         minSize = 5, maxSize = 500, kcdf = "Gaussian")
+                         minSize = gsea_min, maxSize = gsea_max, kcdf = "Gaussian")
 gsva_res <- gsva(gsva_param)
 cat(sprintf("  GSVA complete: %d gene sets x %d samples\n",
             nrow(gsva_res), ncol(gsva_res)))

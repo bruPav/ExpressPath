@@ -74,6 +74,9 @@ def main():
         reader = csv.DictReader(f, delimiter="\t")
         header = list(reader.fieldnames)
 
+    # First column is the gene identifier (may have any name)
+    gene_id_col = header[0]
+
     # Verify all count columns from column_map exist in TSV
     count_col_names = [c[0] for c in COUNT_COLUMNS]
     missing = [c for c in count_col_names if c not in header]
@@ -107,7 +110,7 @@ def main():
     with open(input_tsv, "r") as f:
         reader = csv.DictReader(f, delimiter="\t")
         for row in reader:
-            gene_id = row.get("", "").strip()
+            gene_id = row.get(gene_id_col, "").strip()
             symbol  = row.get("gene_name", "").strip()
 
             if not gene_id:

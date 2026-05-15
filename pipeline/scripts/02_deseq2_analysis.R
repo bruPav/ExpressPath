@@ -9,9 +9,11 @@
 # ─── Snakemake integration ───
 if (exists("snakemake")) {
   out_dir <- dirname(snakemake@output[["combined"]])
+  alpha_val <- 0.05
 } else {
   args <- commandArgs(trailingOnly = TRUE)
   out_dir <- if (length(args) >= 1) args[1] else "results"
+  alpha_val <- if (length(args) >= 3) as.numeric(args[3]) else 0.05
 }
 
 suppressPackageStartupMessages({
@@ -90,10 +92,10 @@ cat(sprintf("  time_points: %s (ref: %s)\n", paste(tp_ids, collapse=", "), ref_t
 cat("\n=== Part A: Likelihood Ratio Test ===\n")
 
 dds_lrt <- DESeq(dds, test = "LRT", reduced = ~ batch + cell_line)
-res_lrt <- results(dds_lrt, alpha = 0.05)
+res_lrt <- results(dds_lrt, alpha = alpha_val)
 res_lrt <- res_lrt[order(res_lrt$pvalue), ]
 
-cat(sprintf("LRT: %d genes with padj < 0.05\n", sum(res_lrt$padj < 0.05, na.rm = TRUE)))
+cat(sprintf("LRT: %d genes with padj < %.2g\n", sum(res_lrt$padj < alpha_val, na.rm = TRUE), alpha_val))
 cat(sprintf("LRT: %d genes with padj < 0.01\n", sum(res_lrt$padj < 0.01, na.rm = TRUE)))
 
 # --- 4. Part B: Pairwise Wald contrasts ---
@@ -131,8 +133,8 @@ extract_contrast <- function(dds, name = NULL, contrast = NULL, label = "") {
   } else {
     res <- lfcShrink(dds, contrast = contrast, type = "ashr", quiet = TRUE)
   }
-  cat(sprintf("  %-50s: %5d sig (padj < 0.05)\n",
-              label, sum(res$padj < 0.05, na.rm = TRUE)))
+  cat(sprintf("  %-50s: %5d sig (padj < %.2g)\n",
+              label, sum(res$padj < alpha_val, na.rm = TRUE), alpha_val))
   res
 }
 
@@ -280,7 +282,7 @@ for (cname in names(contrast_list)) {
 }
 
 # Add mock_is_DE flag
-combined$mock_is_DE <- combined[[paste0(nonref_cl, "_vs_", ref_cl, "_", ref_tp, "_padj")]] < 0.05
+combined$mock_is_DE <- combined[[paste0(nonref_cl, "_vs_", ref_cl, "_", ref_tp, "_padj")]] < alpha_val
 combined$mock_is_DE[is.na(combined$mock_is_DE)] <- FALSE
 
 # Merge annotations (rename gene_id to match)
@@ -291,7 +293,7 @@ combined <- merge(combined, annotations, by = "gene_id", all.x = TRUE)
 combined <- combined[order(combined$lrt_pvalue), ]
 
 # Add overall significance flag
-combined$lrt_signif <- combined$lrt_padj < 0.05
+combined$lrt_signif <- combined$lrt_padj < alpha_val
 combined$lrt_signif[is.na(combined$lrt_signif)] <- FALSE
 
 # Write full combined table
@@ -305,40 +307,40 @@ signif_lrt <- combined[combined$lrt_signif, ]
 write.table(signif_lrt,
             file = file.path(out_dir, "signif_lrt.tsv"),
             sep = "\t", row.names = FALSE, quote = FALSE)
-cat(sprintf("Wrote signif_lrt.tsv (%d genes with LRT padj < 0.05)\n",
-            nrow(signif_lrt)))
+cat(sprintf("Wrote signif_lrt.tsv (%d genes with LRT padj < %.2g)\n",
+            nrow(signif_lrt), alpha_val))
 
-# Genes with LRT padj < 0.05 AND at least one contrast |log2FC| > 1
+# Genes with LRT padj < threshold AND at least one contrast |log2FC| > 1
 fc_cols <- grep("_log2FC$", names(combined), value = TRUE)
 has_fc1 <- apply(combined[, fc_cols, drop = FALSE], 1, function(x) any(abs(x) > 1, na.rm = TRUE))
 signif_fc1 <- combined[combined$lrt_signif & has_fc1, ]
 write.table(signif_fc1,
             file = file.path(out_dir, "signif_lrt_foldchange1.tsv"),
             sep = "\t", row.names = FALSE, quote = FALSE)
-cat(sprintf("Wrote signif_lrt_foldchange1.tsv (%d genes with padj<0.05 & |log2FC|>1)\n",
-            nrow(signif_fc1)))
+cat(sprintf("Wrote signif_lrt_foldchange1.tsv (%d genes with padj < %.2g & |log2FC|>1)\n",
+            nrow(signif_fc1), alpha_val))
 
 # --- 6. Summary statistics ---
 cat("\n=== Summary Statistics ===\n")
 cat(sprintf("\nTotal genes tested: %d\n", nrow(combined)))
-cat(sprintf("LRT significant (padj < 0.05): %d (%.1f%%)\n",
+cat(sprintf("LRT significant (padj < %.2g): %d (%.1f%%)\n",
             sum(combined$lrt_signif),
-            100 * sum(combined$lrt_signif) / nrow(combined)))
+            100 * sum(combined$lrt_signif) / nrow(combined), alpha_val))
 cat(sprintf("LRT + |log2FC| > 1: %d\n\n", nrow(signif_fc1)))
 
-cat("Significant genes per contrast (padj < 0.05):\n")
+cat(sprintf("Significant genes per contrast (padj < %.2g):\n", alpha_val))
 for (cname in names(contrast_list)) {
   padj_col <- paste0(cname, "_padj")
-  n_sig <- sum(combined[[padj_col]] < 0.05, na.rm = TRUE)
-  n_up  <- sum(combined[[padj_col]] < 0.05 &
+  n_sig <- sum(combined[[padj_col]] < alpha_val, na.rm = TRUE)
+  n_up  <- sum(combined[[padj_col]] < alpha_val &
                combined[[paste0(cname, "_log2FC")]] > 0, na.rm = TRUE)
-  n_dn  <- sum(combined[[padj_col]] < 0.05 &
+  n_dn  <- sum(combined[[padj_col]] < alpha_val &
                combined[[paste0(cname, "_log2FC")]] < 0, na.rm = TRUE)
   cat(sprintf("  %-30s %6d sig  (up: %5d, down: %5d)\n", cname, n_sig, n_up, n_dn))
 }
 
-cat(sprintf("\nBaseline differences (mock_is_DE): %d genes differ at mock (padj < 0.05)\n",
-            sum(combined$mock_is_DE, na.rm = TRUE)))
+cat(sprintf("\nBaseline differences (mock_is_DE): %d genes differ at mock (padj < %.2g)\n",
+            sum(combined$mock_is_DE, na.rm = TRUE), alpha_val))
 
 # --- 7. Visualizations ---
 cat("\n=== Creating Plots ===\n")
@@ -439,7 +441,7 @@ for (vc in volcano_contrasts) {
   )
   vol_data <- vol_data[!is.na(vol_data$padj), ]
   vol_data$neg_log10_padj <- -log10(vol_data$padj)
-  vol_data$signif <- vol_data$padj < 0.05
+  vol_data$signif <- vol_data$padj < alpha_val
   vol_data$label <- ifelse(vol_data$signif & abs(vol_data$log2FC) > 2,
                            vol_data$gene_symbol, "")
 
@@ -448,7 +450,7 @@ for (vc in volcano_contrasts) {
     geom_text_repel(aes(label = label), size = 2.5, max.overlaps = 30,
                     box.padding = 0.3, point.padding = 0.2) +
     scale_color_manual(values = c("FALSE" = "grey60", "TRUE" = "red")) +
-    geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "blue") +
+    geom_hline(yintercept = -log10(alpha_val), linetype = "dashed", color = "blue") +
     geom_vline(xintercept = c(-1, 1), linetype = "dotted", color = "grey40") +
     xlab("log2 Fold Change") +
     ylab("-log10(adjusted p-value)") +

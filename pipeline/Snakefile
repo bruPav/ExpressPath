@@ -38,8 +38,6 @@ if run_id_raw == "auto":
 else:
     run_id = run_id_raw
 
-out_dir = f"../results/{run_id}"
-
 # ─── Resolved params ───
 count_filter_val = config.get("count_filter_threshold", 10)
 pvalue_val       = config.get("pvalue_threshold", 0.05)
@@ -85,7 +83,7 @@ rule extract_counts:
     conda:
         "envs/rnaseq.yaml"
     shell:
-        "python scripts/01_extract_counts.py {input.tsv} --out-dir {out_dir} --count-filter {params.count_filter}"
+        "python scripts/01_extract_counts.py {input.tsv} --out-dir {out_dir} --count-filter {params.count_filter} --design {config[design]}"
 
 
 # ─── Step 2: DESeq2 analysis (LRT + pairwise contrasts) ───
@@ -105,7 +103,7 @@ rule deseq2_analysis:
     conda:
         "envs/rnaseq.yaml"
     shell:
-        "Rscript scripts/02_deseq2_analysis.R {out_dir}"
+        "Rscript scripts/02_deseq2_analysis.R {out_dir} {config[design]} {pvalue_val}"
 
 
 # ─── Step 3: Pathway analysis (GSEA + Pathview + GSVA) ───
@@ -124,7 +122,7 @@ rule pathway_analysis:
     conda:
         "envs/rnaseq.yaml"
     shell:
-        "Rscript scripts/03_pathway_analysis.R {out_dir} {pathway_dir}"
+        "Rscript scripts/03_pathway_analysis.R {out_dir} {pathway_dir} {gsea_min_val} {gsea_max_val}"
 
 
 # ─── Step 4: Interactive HTML report ───
@@ -140,4 +138,4 @@ rule interactive_report:
     conda:
         "envs/rnaseq.yaml"
     shell:
-        "Rscript scripts/04_interactive_report.R {out_dir} {pathway_dir}"
+        "Rscript scripts/04_interactive_report.R {out_dir} {pathway_dir} {config[design]}"
