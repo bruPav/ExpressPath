@@ -836,19 +836,19 @@ body_html <- as.character(tags$body(
                 tags$label(class = "form-label fw-bold", "Filter:"),
                 tags$div(class = "d-flex gap-3 flex-wrap",
                   tags$div(class = "form-check",
-                    tags$input(class = "form-check-input filter-check", type = "checkbox", id = "filterTreatment", checked = FALSE),
+                    tags$input(class = "form-check-input filter-check", type = "checkbox", id = "filterTreatment"),
                     tags$label(class = "form-check-label", `for` = "filterTreatment", "Treatment-driven only")
                   ),
                   tags$div(class = "form-check",
-                    tags$input(class = "form-check-input filter-check", type = "checkbox", id = "filterPad01", checked = FALSE),
+                    tags$input(class = "form-check-input filter-check", type = "checkbox", id = "filterPad01"),
                     tags$label(class = "form-check-label", `for` = "filterPad01", "padj < 0.01 only")
                   ),
                   tags$div(class = "form-check",
-                    tags$input(class = "form-check-input filter-check", type = "checkbox", id = "filterUp", checked = FALSE),
+                    tags$input(class = "form-check-input filter-check", type = "checkbox", id = "filterUp"),
                     tags$label(class = "form-check-label", `for` = "filterUp", "Up-regulated only")
                   ),
                   tags$div(class = "form-check",
-                    tags$input(class = "form-check-input filter-check", type = "checkbox", id = "filterDown", checked = FALSE),
+                    tags$input(class = "form-check-input filter-check", type = "checkbox", id = "filterDown"),
                     tags$label(class = "form-check-label", `for` = "filterDown", "Down-regulated only")
                   )
                 )
@@ -879,13 +879,21 @@ $(document).ready(function() {
     var pad01 = $("#filterPad01").is(":checked");
     var onlyUp = $("#filterUp").is(":checked");
     var onlyDown = $("#filterDown").is(":checked");
+    console.log("updateVisibility called, searchVal=" + searchVal);
 
+    var totalCards = $(".pathway-card").length;
+    console.log("Found " + totalCards + " pathway cards");
+
+    var visibleCount = 0, hiddenCount = 0;
     $(".pathway-card").each(function() {
       var card = $(this);
       var show = true;
 
       if (searchVal) {
-        var searchData = card.attr("data-search").toLowerCase();
+        var searchData = (card.attr("data-search") || "").toLowerCase();
+        if (hiddenCount + visibleCount < 3) {
+          console.log("card " + card.attr("id") + " data-search=" + searchData);
+        }
         if (searchData.indexOf(searchVal) === -1) show = false;
       }
       if (treatmentOnly && card.attr("data-treatment-driven") !== "true") show = false;
@@ -897,7 +905,9 @@ $(document).ready(function() {
       if (onlyDown && card.attr("data-direction") !== "down") show = false;
 
       card.toggle(show);
+      if (show) visibleCount++; else hiddenCount++;
     });
+    console.log("Visible: " + visibleCount + ", Hidden: " + hiddenCount);
   }
 
   window.expandAll = function() {
