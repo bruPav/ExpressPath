@@ -61,16 +61,21 @@ tp_list   <- f$time_points
 treat_id  <- f$treatment$id
 comp      <- design$comparisons
 
-ref_cl     <- cl_list[[1]]$id
-nonref_cl  <- cl_list[[2]]$id
-ref_tp     <- tp_list[[1]]$id
-nonref_tps <- sapply(tp_list[-1], `[[`, "id")
 cl_ids     <- sapply(cl_list, `[[`, "id")
 tp_ids     <- sapply(tp_list, `[[`, "id")
 
-# Helper: short label for a time point
+# Helper: short label for a time point (keyed by original IDs)
 tp_short <- setNames(sapply(tp_list, `[[`, "short"), tp_ids)
 cl_short <- setNames(sapply(cl_list, `[[`, "short"), cl_ids)
+
+ref_cl     <- f$reference_cell_line %||% cl_ids[1]
+ref_tp     <- f$reference_time_point %||% tp_ids[1]
+
+# Reorder so reference is first (DESeq2 uses first level as baseline)
+cl_ids     <- c(ref_cl, setdiff(cl_ids, ref_cl))
+tp_ids     <- c(ref_tp, setdiff(tp_ids, ref_tp))
+nonref_cl  <- setdiff(cl_ids, ref_cl)[1]
+nonref_tps <- setdiff(tp_ids, ref_tp)
 
 metadata$cell_line <- factor(metadata$cell_line, levels = cl_ids)
 metadata$time      <- factor(metadata$time, levels = tp_ids)

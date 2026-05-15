@@ -84,8 +84,8 @@ cl_ids    <- sapply(cl_list, `[[`, "id")
 tp_ids    <- sapply(tp_list, `[[`, "id")
 cl_short  <- setNames(sapply(cl_list, `[[`, "short"), cl_ids)
 tp_short  <- setNames(sapply(tp_list, `[[`, "short"), tp_ids)
-ref_cl    <- cl_ids[1]
-ref_tp    <- tp_ids[1]
+ref_cl    <- f$reference_cell_line %||% cl_ids[1]
+ref_tp    <- f$reference_time_point %||% tp_ids[1]
 
 # Extract contrast names from combined_results columns
 all_contrasts <- unique(gsub("_log2FC$", "",

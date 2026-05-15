@@ -122,7 +122,7 @@ rule pathway_analysis:
     conda:
         "envs/rnaseq.yaml"
     shell:
-        "Rscript scripts/03_pathway_analysis.R {out_dir} {pathway_dir} {gsea_min_val} {gsea_max_val}"
+        "Rscript scripts/03_pathway_analysis.R {out_dir} {pathway_dir} {gsea_min_val} {gsea_max_val} {design_path}"
 
 
 # ─── Step 4: Interactive HTML report ───

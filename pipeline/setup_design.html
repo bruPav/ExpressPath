@@ -52,11 +52,11 @@ tr.unmatched select { border-color: #dc2626; }
     <div class="row">
       <div class="field">
         <label>Cell lines (comma-separated)</label>
-        <input type="text" id="cellLines" value="A549, E6" placeholder="e.g. HeLa, MCF7">
+        <input type="text" id="cellLines" value="A549, E6" placeholder="e.g. HeLa, MCF7" oninput="populateRefSelects()">
       </div>
       <div class="field">
-        <label>Time points (comma, first=baseline)</label>
-        <input type="text" id="timePoints" value="mock, 1h, 3h" placeholder="e.g. mock, 30m, 1h, 3h, 6h">
+        <label>Time points (comma-separated)</label>
+        <input type="text" id="timePoints" value="mock, 1h, 3h" placeholder="e.g. mock, 30m, 1h, 3h, 6h" oninput="populateRefSelects()">
       </div>
       <div class="field">
         <label>Treatment ID (column prefix)</label>
@@ -69,6 +69,16 @@ tr.unmatched select { border-color: #dc2626; }
       <div class="field">
         <label>Replicates</label>
         <input type="number" id="replicates" value="3" min="1" max="20" style="width:70px">
+      </div>
+    </div>
+    <div class="row">
+      <div class="field">
+        <label>Reference cell line (baseline)</label>
+        <select id="refCellLine" style="min-width:180px"><option value="">--</option></select>
+      </div>
+      <div class="field">
+        <label>Reference time point (baseline)</label>
+        <select id="refTimePoint" style="min-width:220px"><option value="">--</option></select>
       </div>
     </div>
   </div>
@@ -148,18 +158,35 @@ document.getElementById('tsvFile').addEventListener('change', function(e) {
 // ─── Parse user input ───
 function parseList(str) { return str.split(',').map(s => s.trim()).filter(s => s); }
 
+// ─── Populate reference selects from text inputs ───
+function populateRefSelects() {
+  const cls = parseList(document.getElementById('cellLines').value);
+  const tps = parseList(document.getElementById('timePoints').value);
+  const refCl = document.getElementById('refCellLine');
+  const refTp = document.getElementById('refTimePoint');
+  const prevCl = refCl.value;
+  const prevTp = refTp.value;
+  refCl.innerHTML = cls.map(c => `<option value="${c}">${c}</option>`).join('');
+  refTp.innerHTML = tps.map(t => `<option value="${t}">${t}</option>`).join('');
+  if (cls.includes(prevCl)) refCl.value = prevCl;
+  if (tps.includes(prevTp)) refTp.value = prevTp;
+}
+
 function getDesign() {
   return {
     cellLines: parseList(document.getElementById('cellLines').value),
     timePoints: parseList(document.getElementById('timePoints').value),
     treatId: document.getElementById('treatId').value.trim(),
     treatLabel: document.getElementById('treatLabel').value.trim(),
-    replicates: parseInt(document.getElementById('replicates').value) || 3
+    replicates: parseInt(document.getElementById('replicates').value) || 3,
+    refCellLine: document.getElementById('refCellLine').value,
+    refTimePoint: document.getElementById('refTimePoint').value
   };
 }
 
 // ─── Generate mapping table ───
 function generateTable() {
+  populateRefSelects();
   const d = getDesign();
   if (!d.cellLines.length || !d.timePoints.length) {
     alert('Please fill in cell lines and time points.');
@@ -317,7 +344,7 @@ function updateValidation() {
       unfilled++;
       tr.classList.add('unmatched');
     }
-    if (tr.dataset.time === d.timePoints[0]) {
+    if (tr.dataset.time === (d.refTimePoint || d.timePoints[0])) {
       mockStatus[tr.dataset.cellLine] = mockStatus[tr.dataset.cellLine] || !!sel.value;
     }
   });
@@ -420,12 +447,14 @@ function downloadDesign() {
     };
   });
 
+  const refTp = d.refTimePoint || d.timePoints[0];
+
   const clList = d.cellLines.map(c => {
     return {id: c, short: (/mock/i.test(c) ? 'm' : c[0].toUpperCase())};
   });
 
   const tpList = d.timePoints.map(t => {
-    const s = t === d.timePoints[0] ? 'm' : (t[0]);
+    const s = t === refTp ? 'm' : (t[0]);
     return {id: t, label: t, short: s};
   });
 
@@ -435,7 +464,9 @@ function downloadDesign() {
       cell_lines: clList,
       time_points: tpList,
       treatment: {id: d.treatId, label: d.treatLabel},
-      replicates: d.replicates
+      replicates: d.replicates,
+      reference_cell_line: d.refCellLine || d.cellLines[0],
+      reference_time_point: d.refTimePoint || d.timePoints[0]
     },
     column_map: columnMap,
     comparisons: {
@@ -455,6 +486,7 @@ function downloadDesign() {
   a.click();
   URL.revokeObjectURL(url);
 }
+populateRefSelects();
 </script>
 </body>
 </html>

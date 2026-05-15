@@ -19,6 +19,8 @@ factors:
     id: "Ad26"
     label: "Ad26"
   replicates: 3
+  reference_cell_line: "A549"
+  reference_time_point: "mock"
 column_map:
   A_m-1:
     cell_line: "A549"

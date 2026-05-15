@@ -10,13 +10,23 @@ if (exists("snakemake")) {
   out_dir     <- dirname(snakemake@output[["gsea_kegg"]])
   gsea_min    <- 15
   gsea_max    <- 500
+  design <- jsonlite::fromJSON(snakemake@params$design)
 } else {
   args <- commandArgs(trailingOnly = TRUE)
   results_dir <- if (length(args) >= 1) args[1] else "results"
   out_dir     <- if (length(args) >= 2) args[2] else file.path(results_dir, "pathway")
   gsea_min    <- if (length(args) >= 3) as.integer(args[3]) else 15L
   gsea_max    <- if (length(args) >= 4) as.integer(args[4]) else 500L
+  design_file <- if (length(args) >= 5) args[5] else "../data/design.yaml"
+  if (file.exists(design_file)) {
+    suppressPackageStartupMessages(library("yaml"))
+    design <- yaml::read_yaml(design_file)
+  } else {
+    design <- list()
+  }
 }
+
+`%||%` <- function(a, b) if (is.null(a) || is.na(a) || length(a) == 0) b else a
 
 suppressPackageStartupMessages({
   library("clusterProfiler")
@@ -333,9 +343,9 @@ cat("Testing differential pathway activity...\n")
 # Auto-generate tests from metadata factors
 cl_levs <- levels(metadata$cell_line)
 tp_levs <- levels(metadata$time)
-ref_cl <- cl_levs[1]
+ref_cl <- design$factors$reference_cell_line %||% cl_levs[1]
 nonref_cl <- setdiff(cl_levs, ref_cl)[1]
-ref_tp <- tp_levs[1]
+ref_tp <- design$factors$reference_time_point %||% tp_levs[1]
 nonref_tps <- setdiff(tp_levs, ref_tp)
 
 diff_tests <- list()
