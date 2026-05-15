@@ -83,7 +83,7 @@ rule extract_counts:
     conda:
         "envs/rnaseq.yaml"
     shell:
-        "python scripts/01_extract_counts.py {input.tsv} --out-dir {out_dir} --count-filter {params.count_filter} --design {config[design]}"
+        "python scripts/01_extract_counts.py {input.tsv} --out-dir {out_dir} --count-filter {params.count_filter} --design {design_path}"
 
 
 # ─── Step 2: DESeq2 analysis (LRT + pairwise contrasts) ───
@@ -103,7 +103,7 @@ rule deseq2_analysis:
     conda:
         "envs/rnaseq.yaml"
     shell:
-        "Rscript scripts/02_deseq2_analysis.R {out_dir} {config[design]} {pvalue_val}"
+        "Rscript scripts/02_deseq2_analysis.R {out_dir} {design_path} {pvalue_val}"
 
 
 # ─── Step 3: Pathway analysis (GSEA + Pathview + GSVA) ───
@@ -138,4 +138,4 @@ rule interactive_report:
     conda:
         "envs/rnaseq.yaml"
     shell:
-        "Rscript scripts/04_interactive_report.R {out_dir} {pathway_dir} {config[design]}"
+        "Rscript scripts/04_interactive_report.R {out_dir} {pathway_dir} {design_path}"
