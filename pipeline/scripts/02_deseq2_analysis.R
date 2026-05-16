@@ -898,13 +898,19 @@ if (length(nonref_tps) >= 2) {
       ann_row <- data.frame(Category = cl_act_df$category, row.names = rownames(lfc_mat))
       ann_colors <- list(Category = cat_colors[intersect(names(cat_colors), unique(cl_act_df$category))])
 
+      abs_vals <- abs(lfc_mat[is.finite(lfc_mat) & lfc_mat != 0])
+      lim <- if (length(abs_vals) > 0) max(3, quantile(abs_vals, 0.90, na.rm = TRUE)) else 3
+      lfc_mat_clamped <- lfc_mat
+      lfc_mat_clamped[lfc_mat_clamped >  lim] <-  lim
+      lfc_mat_clamped[lfc_mat_clamped < -lim] <- -lim
+
       pdf(file.path(out_dir, paste0("gene_activity_heatmap_", cl, ".pdf")),
           width = max(6, 2 + length(lfc_cols) * 1.2),
           height = max(6, nrow(lfc_mat) * 0.25))
-      pheatmap(lfc_mat, annotation_row = ann_row, annotation_colors = ann_colors,
+      pheatmap(lfc_mat_clamped, annotation_row = ann_row, annotation_colors = ann_colors,
                cluster_rows = FALSE, cluster_cols = FALSE,
                color = colorRampPalette(c("blue", "white", "red"))(100),
-               breaks = seq(-max(abs(lfc_mat), 3), max(abs(lfc_mat), 3), length.out = 101),
+               breaks = seq(-lim, lim, length.out = 101),
                main = paste0("Gene Activity: ", cl),
                fontsize_row = 7, fontsize_col = 10,
                display_numbers = nrow(lfc_mat) <= 30,
@@ -915,10 +921,10 @@ if (length(nonref_tps) >= 2) {
           width = max(6, 2 + length(lfc_cols) * 1.2),
           height = max(6, nrow(lfc_mat) * 0.25),
           units = "in", res = 150)
-      pheatmap(lfc_mat, annotation_row = ann_row, annotation_colors = ann_colors,
+      pheatmap(lfc_mat_clamped, annotation_row = ann_row, annotation_colors = ann_colors,
                cluster_rows = FALSE, cluster_cols = FALSE,
                color = colorRampPalette(c("blue", "white", "red"))(100),
-               breaks = seq(-max(abs(lfc_mat), 3), max(abs(lfc_mat), 3), length.out = 101),
+               breaks = seq(-lim, lim, length.out = 101),
                main = paste0("Gene Activity: ", cl),
                fontsize_row = 7, fontsize_col = 10,
                display_numbers = nrow(lfc_mat) <= 30,
