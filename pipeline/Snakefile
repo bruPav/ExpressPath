@@ -10,6 +10,8 @@ import sys
 import yaml
 from datetime import datetime
 
+configfile: "config.yaml"
+
 # ─── Load design ───
 design_path = config.get("design", "../data/design.yaml")
 if not os.path.exists(design_path):
