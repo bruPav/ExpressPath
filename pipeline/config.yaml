@@ -14,6 +14,10 @@ count_filter_threshold: 10                           # Min total count across al
 # ─── DESeq2 ───
 pvalue_threshold: 0.05                               # alpha for significance
 
+# ─── Temporal Analysis ───
+temporal_n_clusters: 6                               # Number of Mfuzz clusters ("auto" for automatic)
+temporal_foldchange_threshold: 1                     # |log2FC| threshold for persistence/Venn classification
+
 # ─── GSEA ───
 gsea_min_set_size: 15                                # Min genes in a KEGG pathway
 gsea_max_set_size: 500                               # Max genes in a KEGG pathway

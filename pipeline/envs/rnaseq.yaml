@@ -18,6 +18,10 @@ dependencies:
   - bioconductor-org.hs.eg.db
   - bioconductor-gsva
   - bioconductor-pathview
+  # Temporal analysis
+  - bioconductor-mfuzz
+  - r-complexupset
+  - r-venndiagram
   # Report
   - r-htmltools
   - r-base64enc

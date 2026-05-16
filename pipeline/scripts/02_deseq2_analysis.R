@@ -7,13 +7,21 @@
 #
 
 # ─── Snakemake integration ───
+temporal_n_clusters <- 6
+temporal_fc_thresh <- 1
 if (exists("snakemake")) {
   out_dir <- dirname(snakemake@output[["combined"]])
   alpha_val <- 0.05
+  if (!is.null(snakemake@params$temporal_n_clusters))
+    temporal_n_clusters <- as.integer(snakemake@params$temporal_n_clusters)
+  if (!is.null(snakemake@params$temporal_fc_thresh))
+    temporal_fc_thresh <- as.numeric(snakemake@params$temporal_fc_thresh)
 } else {
   args <- commandArgs(trailingOnly = TRUE)
   out_dir <- if (length(args) >= 1) args[1] else "results"
   alpha_val <- if (length(args) >= 3) as.numeric(args[3]) else 0.05
+  temporal_n_clusters <- if (length(args) >= 4) as.integer(args[4]) else 6
+  temporal_fc_thresh   <- if (length(args) >= 5) as.numeric(args[5]) else 1
 }
 
 suppressPackageStartupMessages({
@@ -24,6 +32,9 @@ suppressPackageStartupMessages({
   library("dplyr")
   library("ggrepel")
   library("jsonlite")
+  library("Mfuzz")
+  library("ComplexUpset")
+  library("VennDiagram")
 })
 
 `%||%` <- function(a, b) if (is.null(a) || is.na(a) || length(a) == 0) b else a
@@ -63,6 +74,7 @@ comp      <- design$comparisons
 
 cl_ids     <- sapply(cl_list, `[[`, "id")
 tp_ids     <- sapply(tp_list, `[[`, "id")
+tp_order   <- setNames(sapply(tp_list, function(x) x$temporal_order %||% which(tp_ids == x$id)), tp_ids)
 
 # Helper: short label for a time point (keyed by original IDs)
 tp_short <- setNames(sapply(tp_list, `[[`, "short"), tp_ids)
@@ -493,6 +505,474 @@ write.table(vst_df,
             file = file.path(out_dir, "vst_normalized_counts.tsv"),
             sep = "\t", row.names = FALSE, quote = FALSE)
 cat("Saved vst_normalized_counts.tsv\n")
+
+# --- 9. Part C: Time-Series Clustering (Mfuzz) ---
+cat("\n=== Part C: Time-Series Clustering (Mfuzz) ===\n")
+
+tp_order_sorted <- sort(tp_order)
+ordered_tps <- names(tp_order_sorted)
+cat(sprintf("Temporal order: %s\n", paste(sprintf("%s(%d)", ordered_tps, tp_order_sorted), collapse = " -> ")))
+
+lrt_signif_genes <- combined$gene_id[combined$lrt_signif]
+cat(sprintf("LRT-significant genes: %d\n", length(lrt_signif_genes)))
+
+cluster_assignments_list <- list()
+cluster_profiles_list <- list()
+
+if (length(lrt_signif_genes) >= 10) {
+  n_clust <- if (is.character(temporal_n_clusters) && temporal_n_clusters == "auto") {
+    min(c(6, floor(sqrt(length(lrt_signif_genes)))))
+  } else {
+    as.integer(temporal_n_clusters)
+  }
+
+  for (cl in cl_ids) {
+    cl_samples <- rownames(metadata)[metadata$cell_line == cl]
+    if (length(cl_samples) == 0) next
+
+    tp_means <- list()
+    for (tp in ordered_tps) {
+      tp_samples <- cl_samples[metadata[cl_samples, "time"] == tp]
+      if (length(tp_samples) == 0) next
+      vst_sub <- assay(vsd)[lrt_signif_genes, tp_samples, drop = FALSE]
+      tp_means[[tp]] <- rowMeans(vst_sub, na.rm = TRUE)
+    }
+
+    tp_matrix <- do.call(cbind, tp_means)
+    colnames(tp_matrix) <- names(tp_means)
+
+    if (nrow(tp_matrix) < 10) {
+      cat(sprintf("  %s: too few genes (%d), skipping\n", cl, nrow(tp_matrix)))
+      next
+    }
+
+    cat(sprintf("  Clustering %s (%d genes x %d timepoints)...\n", cl, nrow(tp_matrix), ncol(tp_matrix)))
+
+    tmp_expr <- tryCatch({
+      new("ExpressionSet", exprs = tp_matrix)
+    }, error = function(e) NULL)
+    if (is.null(tmp_expr)) next
+
+    tmp_s <- standardise(tmp_expr)
+    m1 <- mestimate(tmp_s)
+    cl_result <- mfuzz(tmp_s, c = n_clust, m = m1)
+
+    memb <- cl_result$membership
+    colnames(memb) <- paste0("C", 1:ncol(memb))
+    cluster_assign <- data.frame(
+      gene_id = rownames(memb),
+      cell_line = cl,
+      stringsAsFactors = FALSE
+    )
+    cluster_assign <- cbind(cluster_assign, as.data.frame(memb))
+
+    best_cluster <- max.col(memb)
+    cluster_assign$cluster <- paste0("C", best_cluster)
+    cluster_assign$membership_score <- apply(memb, 1, max)
+    cluster_assignments_list[[cl]] <- cluster_assign
+
+    # Mean profile per cluster
+    for (cn in 1:ncol(memb)) {
+      cluster_genes <- rownames(memb)[best_cluster == cn]
+      if (length(cluster_genes) == 0) next
+      mean_prof <- colMeans(tp_matrix[cluster_genes, , drop = FALSE], na.rm = TRUE)
+      row <- data.frame(
+        cell_line = cl,
+        cluster = paste0("C", cn),
+        n_genes = length(cluster_genes),
+        t(mean_prof),
+        stringsAsFactors = FALSE
+      )
+      cluster_profiles_list[[length(cluster_profiles_list) + 1]] <- row
+    }
+
+    pdf(file.path(out_dir, paste0("cluster_profiles_", cl, ".pdf")), width = 10, height = 8)
+    mfuzz.plot2(tmp_s, cl = cl_result, mfrow = c(ceiling(n_clust / 3), min(3, n_clust)),
+                time.labels = colnames(tp_matrix),
+                xlab = "Time point", ylab = "Expression")
+    dev.off()
+    cat(sprintf("    Saved cluster_profiles_%s.pdf (%d clusters)\n", cl, n_clust))
+  }
+
+  cluster_assign_all <- do.call(rbind, cluster_assignments_list)
+  if (!is.null(cluster_assign_all) && nrow(cluster_assign_all) > 0) {
+    write.table(cluster_assign_all,
+                file = file.path(out_dir, "cluster_assignments.tsv"),
+                sep = "\t", row.names = FALSE, quote = FALSE)
+    cat(sprintf("Wrote cluster_assignments.tsv (%d genes)\n", nrow(cluster_assign_all)))
+  }
+
+  cluster_prof_all <- do.call(rbind, cluster_profiles_list)
+  if (!is.null(cluster_prof_all) && nrow(cluster_prof_all) > 0) {
+    write.table(cluster_prof_all,
+                file = file.path(out_dir, "cluster_mean_profiles.tsv"),
+                sep = "\t", row.names = FALSE, quote = FALSE)
+    cat(sprintf("Wrote cluster_mean_profiles.tsv (%d profiles)\n", nrow(cluster_prof_all)))
+  }
+} else {
+  cat("Fewer than 10 LRT-significant genes; skipping clustering.\n")
+  write.table(data.frame(gene_id = character(), cell_line = character(),
+                         cluster = character(), membership_score = numeric(),
+                         stringsAsFactors = FALSE),
+              file = file.path(out_dir, "cluster_assignments.tsv"),
+              sep = "\t", row.names = FALSE, quote = FALSE)
+  write.table(data.frame(cell_line = character(), cluster = character(),
+                         n_genes = integer(), stringsAsFactors = FALSE),
+              file = file.path(out_dir, "cluster_mean_profiles.tsv"),
+              sep = "\t", row.names = FALSE, quote = FALSE)
+}
+
+# --- 10. Part D: Velocity of Response ---
+cat("\n=== Part D: Velocity of Response ===\n")
+
+velocity_rows <- list()
+for (cl in cl_ids) {
+  for (tp in nonref_tps) {
+    cname <- paste0(cl, "_", tp, "_vs_mock")
+    padj_col <- paste0(cname, "_padj")
+    lfc_col  <- paste0(cname, "_log2FC")
+
+    if (!padj_col %in% colnames(combined)) next
+
+    is_sig <- combined[[padj_col]] < alpha_val & !is.na(combined[[padj_col]])
+    n_sig <- sum(is_sig, na.rm = TRUE)
+    n_up  <- sum(is_sig & combined[[lfc_col]] > 0, na.rm = TRUE)
+    n_down <- sum(is_sig & combined[[lfc_col]] < 0, na.rm = TRUE)
+    mean_abs_lfc <- if (n_sig > 0) mean(abs(combined[[lfc_col]][is_sig]), na.rm = TRUE) else 0
+
+    velocity_rows[[length(velocity_rows) + 1]] <- data.frame(
+      cell_line = cl,
+      timepoint = tp,
+      n_up = n_up,
+      n_down = n_down,
+      n_total = n_sig,
+      mean_abs_log2FC = round(mean_abs_lfc, 4),
+      stringsAsFactors = FALSE
+    )
+  }
+}
+
+velocity_summary <- do.call(rbind, velocity_rows)
+write.table(velocity_summary,
+            file = file.path(out_dir, "velocity_summary.tsv"),
+            sep = "\t", row.names = FALSE, quote = FALSE)
+cat(sprintf("Wrote velocity_summary.tsv\n"))
+
+if (nrow(velocity_summary) > 0) {
+  p_vel <- ggplot(velocity_summary, aes(x = timepoint, y = n_total, fill = cell_line)) +
+    geom_bar(stat = "identity", position = "dodge", width = 0.7) +
+    geom_text(aes(label = n_total), position = position_dodge(0.7), vjust = -0.3, size = 3) +
+    labs(x = "Time Point", y = "Number of DEGs",
+         title = "Response Velocity: DEGs per Time Point",
+         fill = "Cell Line") +
+    theme_minimal(base_size = 14)
+  ggsave(file.path(out_dir, "velocity_barplot.pdf"), p_vel, width = 8, height = 5)
+  cat("Saved velocity_barplot.pdf\n")
+
+  fc_data <- list()
+  for (cl in cl_ids) {
+    for (tp in nonref_tps) {
+      cname <- paste0(cl, "_", tp, "_vs_mock")
+      lfc_col  <- paste0(cname, "_log2FC")
+      padj_col <- paste0(cname, "_padj")
+      if (!padj_col %in% colnames(combined)) next
+      is_sig <- combined[[padj_col]] < alpha_val & !is.na(combined[[padj_col]])
+      if (sum(is_sig) > 0) {
+        fc_data[[length(fc_data) + 1]] <- data.frame(
+          cell_line = cl,
+          timepoint = tp,
+          log2FC = combined[[lfc_col]][is_sig],
+          stringsAsFactors = FALSE
+        )
+      }
+    }
+  }
+  if (length(fc_data) > 0) {
+    fc_df <- do.call(rbind, fc_data)
+    fc_df$tp_cl <- paste(fc_df$timepoint, fc_df$cell_line, sep = "_")
+    p_box <- ggplot(fc_df, aes(x = timepoint, y = log2FC, fill = cell_line)) +
+      geom_boxplot(outlier.size = 0.5, alpha = 0.7) +
+      geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+      labs(x = "Time Point", y = "log2 Fold Change",
+           title = "Response Magnitude: log2FC Distribution per Time Point") +
+      theme_minimal(base_size = 14)
+    ggsave(file.path(out_dir, "velocity_fc_boxplot.pdf"), p_box, width = 8, height = 5)
+    cat("Saved velocity_fc_boxplot.pdf\n")
+  }
+}
+
+# --- 11. Part E: Persistence Check (Venn/UpSet + Heatmap) ---
+cat("\n=== Part E: Persistence Check (Venn/UpSet + Heatmap) ===\n")
+
+if (length(nonref_tps) >= 2) {
+  venn_genelists <- list()
+  persistence_rows <- list()
+  gene_act_rows <- list()
+
+  for (cl in cl_ids) {
+    deg_sets <- list()
+    lfc_vals <- list()
+    padj_vals <- list()
+    for (tp in nonref_tps) {
+      cname <- paste0(cl, "_", tp, "_vs_mock")
+      padj_col <- paste0(cname, "_padj")
+      lfc_col  <- paste0(cname, "_log2FC")
+      if (!padj_col %in% colnames(combined) || !lfc_col %in% colnames(combined)) next
+
+      is_sig <- combined[[padj_col]] < alpha_val & !is.na(combined[[padj_col]])
+      if (temporal_fc_thresh > 0) {
+        is_sig <- is_sig & abs(combined[[lfc_col]]) >= temporal_fc_thresh
+      }
+      deg_genes <- combined$gene_id[is_sig]
+      deg_sets[[tp]] <- deg_genes
+
+      # Store log2FC and padj for these genes (named vector)
+      tmp_lfc <- combined[[lfc_col]]
+      tmp_padj <- combined[[padj_col]]
+      names(tmp_lfc) <- names(tmp_padj) <- combined$gene_id
+      lfc_vals[[tp]] <- tmp_lfc
+      padj_vals[[tp]] <- tmp_padj
+
+      for (g in deg_genes) {
+        venn_genelists[[length(venn_genelists) + 1]] <- data.frame(
+          cell_line = cl,
+          timepoint = tp,
+          gene_id = g,
+          stringsAsFactors = FALSE
+        )
+      }
+    }
+
+    if (length(deg_sets) < 2) next
+
+    all_deg_genes <- unique(unlist(deg_sets))
+    for (gene in all_deg_genes) {
+      tps_present <- names(deg_sets)[sapply(deg_sets, function(s) gene %in% s)]
+      first_tp <- tps_present[1]
+      last_tp  <- tps_present[length(tps_present)]
+      n_tps    <- length(tps_present)
+
+      if (n_tps == 1) {
+        if (first_tp == nonref_tps[1]) {
+          category <- "Transient"
+        } else if (first_tp == tail(nonref_tps, 1)) {
+          category <- "Secondary_Deferred"
+        } else {
+          category <- "Transient_Mid"
+        }
+      } else {
+        if (first_tp == nonref_tps[1] && last_tp == tail(nonref_tps, 1)) {
+          category <- "Sustained"
+        } else if (first_tp == nonref_tps[1]) {
+          category <- "Partially_Sustained"
+        } else {
+          category <- "Complex"
+        }
+      }
+
+      persistence_rows[[length(persistence_rows) + 1]] <- data.frame(
+        gene_id = gene,
+        cell_line = cl,
+        category = category,
+        first_timepoint = first_tp,
+        last_timepoint = last_tp,
+        n_timepoints = n_tps,
+        stringsAsFactors = FALSE
+      )
+
+      # Build gene activity row
+      gsym <- combined$gene_symbol[match(gene, combined$gene_id)]
+      row <- data.frame(gene_id = gene, gene_symbol = gsym, cell_line = cl,
+                        category = category, stringsAsFactors = FALSE)
+      for (tp in nonref_tps) {
+        lfc_v <- if (gene %in% names(lfc_vals[[tp]])) lfc_vals[[tp]][gene] else NA
+        padj_v <- if (gene %in% names(padj_vals[[tp]])) padj_vals[[tp]][gene] else NA
+        is_s <- gene %in% deg_sets[[tp]]
+        row[[paste0("sig_", tp)]] <- is_s
+        row[[paste0("log2FC_", tp)]] <- round(lfc_v, 4)
+        row[[paste0("padj_", tp)]] <- if (is.na(padj_v)) NA else round(padj_v, 6)
+      }
+      gene_act_rows[[length(gene_act_rows) + 1]] <- row
+    }
+
+    # --- Venn or UpSet plot ---
+    n_sets <- length(deg_sets)
+    if (n_sets <= 3) {
+      # Venn diagram
+      venn_sets <- list()
+      for (tp in names(deg_sets)) venn_sets[[tp]] <- deg_sets[[tp]]
+
+      pdf(file.path(out_dir, paste0("venn_plot_", cl, ".pdf")), width = 7, height = 7)
+      if (n_sets == 2) {
+        grid.newpage()
+        draw.pairwise.venn(
+          area1 = length(venn_sets[[1]]), area2 = length(venn_sets[[2]]),
+          cross.area = length(intersect(venn_sets[[1]], venn_sets[[2]])),
+          category = names(venn_sets),
+          fill = c("#E41A1C", "#377EB8"), alpha = 0.5,
+          cex = 1.5, cat.cex = 1.3, cat.pos = c(-30, 30),
+          margin = 0.05
+        )
+      } else {
+        a12 <- length(intersect(venn_sets[[1]], venn_sets[[2]]))
+        a13 <- length(intersect(venn_sets[[1]], venn_sets[[3]]))
+        a23 <- length(intersect(venn_sets[[2]], venn_sets[[3]]))
+        a123 <- length(Reduce(intersect, venn_sets))
+        grid.newpage()
+        draw.triple.venn(
+          area1 = length(venn_sets[[1]]), area2 = length(venn_sets[[2]]),
+          area3 = length(venn_sets[[3]]),
+          n12 = a12, n13 = a13, n23 = a23, n123 = a123,
+          category = names(venn_sets),
+          fill = c("#E41A1C", "#377EB8", "#4DAF4A"), alpha = 0.5,
+          cex = 1.5, cat.cex = 1.3, margin = 0.05
+        )
+      }
+      dev.off()
+      png(file.path(out_dir, paste0("venn_plot_", cl, ".png")), width = 7, height = 7,
+          units = "in", res = 150)
+      if (n_sets == 2) {
+        grid.newpage()
+        draw.pairwise.venn(
+          area1 = length(venn_sets[[1]]), area2 = length(venn_sets[[2]]),
+          cross.area = length(intersect(venn_sets[[1]], venn_sets[[2]])),
+          category = names(venn_sets),
+          fill = c("#E41A1C", "#377EB8"), alpha = 0.5,
+          cex = 1.5, cat.cex = 1.3, cat.pos = c(-30, 30),
+          margin = 0.05
+        )
+      } else {
+        grid.newpage()
+        draw.triple.venn(
+          area1 = length(venn_sets[[1]]), area2 = length(venn_sets[[2]]),
+          area3 = length(venn_sets[[3]]),
+          n12 = a12, n13 = a13, n23 = a23, n123 = a123,
+          category = names(venn_sets),
+          fill = c("#E41A1C", "#377EB8", "#4DAF4A"), alpha = 0.5,
+          cex = 1.5, cat.cex = 1.3, margin = 0.05
+        )
+      }
+      dev.off()
+      cat(sprintf("Saved venn_plot_%s.pdf / .png\n", cl))
+    } else {
+      # UpSet plot for 4+ timepoints
+      upset_genes <- unique(unlist(deg_sets))
+      upset_matrix <- as.data.frame(sapply(names(deg_sets), function(x) {
+        as.integer(upset_genes %in% deg_sets[[x]])
+      }))
+      colnames(upset_matrix) <- paste0(cl, "_", names(deg_sets))
+      rownames(upset_matrix) <- upset_genes
+
+      pdf(file.path(out_dir, paste0("upset_plot_", cl, ".pdf")), width = 10, height = 6)
+      print(upset(upset_matrix, intersect = colnames(upset_matrix),
+                  name = paste0("DEG Overlaps: ", cl),
+                  width_ratio = 0.3))
+      dev.off()
+      png(file.path(out_dir, paste0("upset_plot_", cl, ".png")), width = 10, height = 6,
+          units = "in", res = 150)
+      print(upset(upset_matrix, intersect = colnames(upset_matrix),
+                  name = paste0("DEG Overlaps: ", cl),
+                  width_ratio = 0.3))
+      dev.off()
+      cat(sprintf("Saved upset_plot_%s.pdf / .png\n", cl))
+    }
+
+    # --- Gene activity heatmap ---
+    if (length(all_deg_genes) >= 3) {
+      cl_act_rows <- gene_act_rows[sapply(gene_act_rows, function(x) x$cell_line == cl)]
+      cl_act_df <- do.call(rbind, cl_act_rows)
+      cl_act_df <- cl_act_df[order(cl_act_df$category, cl_act_df$gene_id), ]
+
+      # Build log2FC matrix
+      lfc_cols <- grep("^log2FC_", names(cl_act_df), value = TRUE)
+      lfc_mat <- as.matrix(cl_act_df[, lfc_cols, drop = FALSE])
+      lfc_mat[is.na(lfc_mat)] <- 0
+      rownames(lfc_mat) <- ifelse(is.na(cl_act_df$gene_symbol) | cl_act_df$gene_symbol == "--" | cl_act_df$gene_symbol == "",
+                                  cl_act_df$gene_id, cl_act_df$gene_symbol)
+      colnames(lfc_mat) <- sub("^log2FC_", "", lfc_cols)
+
+      # Category annotation
+      cat_colors <- c("Transient" = "#4DAF4A", "Sustained" = "#FF7F00",
+                      "Secondary_Deferred" = "#377EB8", "Partially_Sustained" = "#984EA3",
+                      "Transient_Mid" = "#F781BF", "Complex" = "#999999")
+      ann_row <- data.frame(Category = cl_act_df$category, row.names = rownames(lfc_mat))
+      ann_colors <- list(Category = cat_colors[intersect(names(cat_colors), unique(cl_act_df$category))])
+
+      pdf(file.path(out_dir, paste0("gene_activity_heatmap_", cl, ".pdf")),
+          width = max(6, 2 + length(lfc_cols) * 1.2),
+          height = max(6, nrow(lfc_mat) * 0.25))
+      pheatmap(lfc_mat, annotation_row = ann_row, annotation_colors = ann_colors,
+               cluster_rows = FALSE, cluster_cols = FALSE,
+               color = colorRampPalette(c("blue", "white", "red"))(100),
+               breaks = seq(-max(abs(lfc_mat), 3), max(abs(lfc_mat), 3), length.out = 101),
+               main = paste0("Gene Activity: ", cl),
+               fontsize_row = 7, fontsize_col = 10,
+               display_numbers = nrow(lfc_mat) <= 30,
+               number_format = "%.2f", number_color = "black",
+               border_color = NA, legend = TRUE)
+      dev.off()
+      png(file.path(out_dir, paste0("gene_activity_heatmap_", cl, ".png")),
+          width = max(6, 2 + length(lfc_cols) * 1.2),
+          height = max(6, nrow(lfc_mat) * 0.25),
+          units = "in", res = 150)
+      pheatmap(lfc_mat, annotation_row = ann_row, annotation_colors = ann_colors,
+               cluster_rows = FALSE, cluster_cols = FALSE,
+               color = colorRampPalette(c("blue", "white", "red"))(100),
+               breaks = seq(-max(abs(lfc_mat), 3), max(abs(lfc_mat), 3), length.out = 101),
+               main = paste0("Gene Activity: ", cl),
+               fontsize_row = 7, fontsize_col = 10,
+               display_numbers = nrow(lfc_mat) <= 30,
+               number_format = "%.2f", number_color = "black",
+               border_color = NA, legend = TRUE)
+      dev.off()
+      cat(sprintf("Saved gene_activity_heatmap_%s.pdf / .png\n", cl))
+    }
+  }
+
+  venn_df <- do.call(rbind, venn_genelists)
+  write.table(venn_df,
+              file = file.path(out_dir, "venn_genelists.tsv"),
+              sep = "\t", row.names = FALSE, quote = FALSE)
+  cat(sprintf("Wrote venn_genelists.tsv (%d entries)\n", nrow(venn_df)))
+
+  persist_df <- do.call(rbind, persistence_rows)
+  write.table(persist_df,
+              file = file.path(out_dir, "persistence_classes.tsv"),
+              sep = "\t", row.names = FALSE, quote = FALSE)
+  cat(sprintf("Wrote persistence_classes.tsv (%d entries)\n", nrow(persist_df)))
+
+  gene_act_df <- do.call(rbind, gene_act_rows)
+  write.table(gene_act_df,
+              file = file.path(out_dir, "gene_activity.tsv"),
+              sep = "\t", row.names = FALSE, quote = FALSE)
+  cat(sprintf("Wrote gene_activity.tsv (%d entries)\n", nrow(gene_act_df)))
+
+  if (!is.null(persist_df) && nrow(persist_df) > 0) {
+    cat("\nPersistence classification summary:\n")
+    for (cat_name in c("Transient", "Secondary_Deferred", "Sustained",
+                       "Partially_Sustained", "Transient_Mid", "Complex")) {
+      n <- sum(persist_df$category == cat_name)
+      if (n > 0) cat(sprintf("  %-25s %6d\n", cat_name, n))
+    }
+  }
+} else {
+  cat("Only one non-reference timepoint; skipping Venn/persistence analysis.\n")
+  write.table(data.frame(cell_line = character(), timepoint = character(),
+                         gene_id = character(), stringsAsFactors = FALSE),
+              file = file.path(out_dir, "venn_genelists.tsv"),
+              sep = "\t", row.names = FALSE, quote = FALSE)
+  write.table(data.frame(gene_id = character(), cell_line = character(),
+                         category = character(), first_timepoint = character(),
+                         last_timepoint = character(), n_timepoints = integer(),
+                         stringsAsFactors = FALSE),
+              file = file.path(out_dir, "persistence_classes.tsv"),
+              sep = "\t", row.names = FALSE, quote = FALSE)
+  write.table(data.frame(gene_id = character(), gene_symbol = character(),
+                         cell_line = character(), category = character(),
+                         stringsAsFactors = FALSE),
+              file = file.path(out_dir, "gene_activity.tsv"),
+              sep = "\t", row.names = FALSE, quote = FALSE)
+}
 
 cat("\n=== Analysis Complete ===\n")
 cat(sprintf("All outputs in: %s/\n", out_dir))

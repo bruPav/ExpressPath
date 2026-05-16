@@ -57,6 +57,7 @@ tr.unmatched select { border-color: #dc2626; }
       <div class="field">
         <label>Time points (comma-separated)</label>
         <input type="text" id="timePoints" value="mock, 1h, 3h" placeholder="e.g. mock, 30m, 1h, 3h, 6h" oninput="populateRefSelects()">
+        <small>Enter in chronological order (earliest → latest). Position in list determines temporal order.</small>
       </div>
       <div class="field">
         <label>Treatment ID (column prefix)</label>
@@ -453,9 +454,9 @@ function downloadDesign() {
     return {id: c, short: (/mock/i.test(c) ? 'm' : c[0].toUpperCase())};
   });
 
-  const tpList = d.timePoints.map(t => {
+  const tpList = d.timePoints.map((t, i) => {
     const s = t === refTp ? 'm' : (t[0]);
-    return {id: t, label: t, short: s};
+    return {id: t, label: t, short: s, temporal_order: i + 1};
   });
 
   const design = {

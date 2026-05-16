@@ -39,10 +39,12 @@ else:
     run_id = run_id_raw
 
 # ─── Resolved params ───
-count_filter_val = config.get("count_filter_threshold", 10)
-pvalue_val       = config.get("pvalue_threshold", 0.05)
-gsea_min_val     = config.get("gsea_min_set_size", 15)
-gsea_max_val     = config.get("gsea_max_set_size", 500)
+count_filter_val  = config.get("count_filter_threshold", 10)
+pvalue_val        = config.get("pvalue_threshold", 0.05)
+temporal_n_clus   = config.get("temporal_n_clusters", 6)
+temporal_fc_thr   = config.get("temporal_foldchange_threshold", 1)
+gsea_min_val      = config.get("gsea_min_set_size", 15)
+gsea_max_val      = config.get("gsea_max_set_size", 500)
 
 # ─── Paths ───
 out_dir         = f"../results/{run_id}"
@@ -53,6 +55,12 @@ combined_file   = f"{out_dir}/combined_results.tsv"
 signif_file     = f"{out_dir}/signif_lrt.tsv"
 signif_fc_file  = f"{out_dir}/signif_lrt_foldchange1.tsv"
 vst_file        = f"{out_dir}/vst_normalized_counts.tsv"
+cluster_file    = f"{out_dir}/cluster_assignments.tsv"
+cluster_prof    = f"{out_dir}/cluster_mean_profiles.tsv"
+velocity_file   = f"{out_dir}/velocity_summary.tsv"
+venn_file       = f"{out_dir}/venn_genelists.tsv"
+persist_file    = f"{out_dir}/persistence_classes.tsv"
+gene_act_file   = f"{out_dir}/gene_activity.tsv"
 
 pathway_dir     = f"{out_dir}/pathway"
 gsea_kegg_file  = f"{pathway_dir}/gsea_kegg_signif.tsv"
@@ -96,14 +104,22 @@ rule deseq2_analysis:
         combined   = combined_file,
         signif     = signif_file,
         signif_fc  = signif_fc_file,
-        vst        = vst_file
+        vst        = vst_file,
+        cluster    = cluster_file,
+        cluster_p  = cluster_prof,
+        velocity   = velocity_file,
+        venn       = venn_file,
+        persist    = persist_file,
+        gene_act   = gene_act_file
     params:
         pvalue = pvalue_val,
-        design = design_json
+        design = design_json,
+        temporal_n_clusters = temporal_n_clus,
+        temporal_fc_thresh  = temporal_fc_thr
     conda:
         "envs/rnaseq.yaml"
     shell:
-        "Rscript scripts/02_deseq2_analysis.R {out_dir} {design_path} {pvalue_val}"
+        "Rscript scripts/02_deseq2_analysis.R {out_dir} {design_path} {pvalue_val} {temporal_n_clus} {temporal_fc_thr}"
 
 
 # ─── Step 3: Pathway analysis (GSEA + Pathview + GSVA) ───
@@ -130,7 +146,13 @@ rule interactive_report:
     input:
         combined   = combined_file,
         gsea_kegg  = gsea_kegg_file,
-        gsea_go    = gsea_go_file
+        gsea_go    = gsea_go_file,
+        cluster    = cluster_file,
+        cluster_p  = cluster_prof,
+        velocity   = velocity_file,
+        venn       = venn_file,
+        persist    = persist_file,
+        gene_act   = gene_act_file
     output:
         report = report_file
     params:

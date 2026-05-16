@@ -18,6 +18,14 @@ suppressPackageStartupMessages({
 
 `%||%` <- function(a, b) if (is.null(a) || is.na(a) || length(a) == 0) b else a
 
+tryRead <- function(path) {
+  if (file.exists(path)) {
+    read.delim(path, stringsAsFactors = FALSE, check.names = FALSE)
+  } else {
+    data.frame()
+  }
+}
+
 cat("=== Building Interactive HTML Report ===\n")
 
 # ─── Snakemake integration ───
@@ -49,6 +57,14 @@ metadata <- read.delim(file.path(results_dir, "metadata.tsv"),
                        stringsAsFactors = FALSE)
 gsea_kegg <- read.delim(file.path(out_dir, "gsea_kegg_signif.tsv"),
                         stringsAsFactors = FALSE)
+
+# Load temporal analysis results
+cluster_assign <- tryRead(file.path(results_dir, "cluster_assignments.tsv"))
+cluster_prof  <- tryRead(file.path(results_dir, "cluster_mean_profiles.tsv"))
+velocity      <- tryRead(file.path(results_dir, "velocity_summary.tsv"))
+venn_genes    <- tryRead(file.path(results_dir, "venn_genelists.tsv"))
+persist       <- tryRead(file.path(results_dir, "persistence_classes.tsv"))
+gene_activity <- tryRead(file.path(results_dir, "gene_activity.tsv"))
 
 # Map ENSG -> ENTREZ
 ensg_ids <- combined$gene_id
@@ -734,6 +750,228 @@ ct_summary_json <- list(
   name = "Enriched pathways"
 )
 
+# =============================================
+# 9. Prepare temporal analysis data for report
+# =============================================
+has_temporal <- nrow(cluster_prof) > 0 || nrow(velocity) > 0 || nrow(persist) > 0
+
+# --- Clustering Plotly data ---
+cluster_plotly <- "[]"
+cluster_tbl_rows <- ""
+cluster_select_opts <- ""
+if (nrow(cluster_prof) > 0) {
+  tp_cols <- setdiff(names(cluster_prof), c("cell_line", "cluster", "n_genes"))
+  traces <- list()
+  cl_idx <- 0
+  cl_colors <- c("#E41A1C", "#377EB8", "#4DAF4A", "#984EA3", "#FF7F00", "#A65628",
+                 "#F781BF", "#999999", "#E7298A", "#66A61E")
+  for (cl in unique(cluster_prof$cell_line)) {
+    cl_data <- cluster_prof[cluster_prof$cell_line == cl, ]
+    for (i in seq_len(nrow(cl_data))) {
+      cl_idx <- cl_idx + 1
+      traces[[length(traces) + 1]] <- list(
+        x = tp_cols,
+        y = as.numeric(cl_data[i, tp_cols]),
+        type = "scatter",
+        mode = "lines+markers",
+        name = paste0(cl, " ", cl_data$cluster[i], " (n=", cl_data$n_genes[i], ")"),
+        line = list(color = cl_colors[((cl_idx - 1) %% length(cl_colors)) + 1], width = 2),
+        marker = list(size = 8)
+      )
+    }
+    cluster_select_opts <- paste0(cluster_select_opts,
+      sprintf('<option value="%s"%s>%s</option>', cl,
+              if (which(unique(cluster_prof$cell_line) == cl) == 1) " selected" else "", cl))
+  }
+  cluster_plotly <- jsonlite::toJSON(traces, auto_unbox = TRUE, force = TRUE)
+
+  if (nrow(cluster_assign) > 0) {
+    for (i in seq_len(min(nrow(cluster_assign), 1000))) {
+      row <- cluster_assign[i, ]
+      memb_str <- paste(sprintf("%.2f", as.numeric(row[, grep("^C[0-9]+$", names(row))])), collapse = ", ")
+      cluster_tbl_rows <- paste0(cluster_tbl_rows,
+        sprintf('<tr><td>%s</td><td>%s</td><td>%s</td><td>%.3f</td><td>%s</td></tr>',
+                row$cell_line, row$gene_id, row$cluster, row$membership_score, memb_str))
+    }
+  }
+}
+
+# --- Velocity Plotly data ---
+velocity_bar_json <- "{}"
+velocity_box_json <- "{}"
+velocity_tbl_html <- ""
+if (nrow(velocity) > 0) {
+  velocity_bar_json <- jsonlite::toJSON(
+    list(list(x = velocity$timepoint, y = velocity$n_up, type = "bar",
+              name = "Up-regulated", marker = list(color = "#E41A1C")),
+         list(x = velocity$timepoint, y = velocity$n_down, type = "bar",
+              name = "Down-regulated", marker = list(color = "#377EB8"))),
+    auto_unbox = TRUE, force = TRUE)
+
+  for (i in seq_len(nrow(velocity))) {
+    row <- velocity[i, ]
+    velocity_tbl_html <- paste0(velocity_tbl_html,
+      sprintf('<tr><td>%s</td><td>%s</td><td>%d</td><td>%d</td><td>%d</td><td>%.3f</td></tr>',
+              row$cell_line, row$timepoint, row$n_up, row$n_down, row$n_total, row$mean_abs_log2FC))
+  }
+}
+
+# --- Persistence data ---
+gene_act_tbl_html <- ""
+
+# --- Gene activity table (from gene_activity.tsv) ---
+gene_act_select <- ""
+if (nrow(gene_activity) > 0) {
+  for (cl in unique(gene_activity$cell_line)) {
+    gene_act_select <- paste0(gene_act_select,
+      sprintf('<option value="%s"%s>%s</option>', cl,
+              if (which(unique(gene_activity$cell_line) == cl) == 1) " selected" else "", cl))
+  }
+  for (i in seq_len(min(nrow(gene_activity), 2000))) {
+    row <- gene_activity[i, ]
+    sig_cols <- grep("^sig_", names(row), value = TRUE)
+    lfc_cols <- grep("^log2FC_", names(row), value = TRUE)
+    sig_html <- paste(sapply(sig_cols, function(sc) {
+      sprintf('<td class="text-center">%s</td>', if (isTRUE(row[[sc]])) "&#10003;" else "")
+    }), collapse = "")
+    lfc_html <- paste(sapply(lfc_cols, function(lc) {
+      v <- row[[lc]]
+      sprintf('<td class="text-end">%s</td>', if (is.na(v)) "" else sprintf("%+.2f", v))
+    }), collapse = "")
+    gene_act_tbl_html <- paste0(gene_act_tbl_html,
+      sprintf('<tr data-cl="%s"><td>%s</td><td>%s</td>%s%s<td>%s</td></tr>',
+              row$cell_line, row$gene_symbol %||% row$gene_id, row$cell_line,
+              sig_html, lfc_html, row$category))
+  }
+}
+
+# --- Base64 encode Venn/UpSet and heatmap PNGs ---
+venn_imgs <- list()
+heat_imgs <- list()
+for (cl in cl_ids) {
+  # Try Venn first, then UpSet
+  png_path <- file.path(results_dir, paste0("venn_plot_", cl, ".png"))
+  if (!file.exists(png_path)) {
+    png_path <- file.path(results_dir, paste0("upset_plot_", cl, ".png"))
+  }
+  if (file.exists(png_path)) {
+    venn_imgs[[cl]] <- base64encode(readBin(png_path, "raw", file.info(png_path)$size))
+  }
+  # Heatmap
+  heat_path <- file.path(results_dir, paste0("gene_activity_heatmap_", cl, ".png"))
+  if (file.exists(heat_path)) {
+    heat_imgs[[cl]] <- base64encode(readBin(heat_path, "raw", file.info(heat_path)$size))
+  }
+}
+
+# --- Build overlay images HTML ---
+overlap_html <- ""
+if (length(venn_imgs) > 0) {
+  for (cl in names(venn_imgs)) {
+    overlap_html <- paste0(overlap_html,
+      sprintf('<div class="col-md-6 mb-3"><h6>%s</h6>
+        <img src="data:image/png;base64,%s" class="img-fluid border" style="max-width:500px" alt="Venn %s"></div>',
+        cl, venn_imgs[[cl]], cl))
+  }
+}
+heat_html <- ""
+if (length(heat_imgs) > 0) {
+  for (cl in names(heat_imgs)) {
+    heat_html <- paste0(heat_html,
+      sprintf('<div class="col-md-6 mb-3"><h6>%s</h6>
+        <img src="data:image/png;base64,%s" class="img-fluid border" style="max-width:500px" alt="Heatmap %s"></div>',
+        cl, heat_imgs[[cl]], cl))
+  }
+}
+
+# --- Gene activity table header (dynamic from data) ---
+gene_act_header <- '<th>Gene</th><th>Cell Line</th>'
+if (nrow(gene_activity) > 0) {
+  tp_cols <- grep("^sig_", names(gene_activity), value = TRUE)
+  for (tp_col in tp_cols) {
+    tp_name <- sub("^sig_", "", tp_col)
+    gene_act_header <- paste0(gene_act_header, sprintf('<th class="text-center">%s sig</th>', tp_name))
+  }
+  lfc_cols <- grep("^log2FC_", names(gene_activity), value = TRUE)
+  for (lfc_col in lfc_cols) {
+    tp_name <- sub("^log2FC_", "", lfc_col)
+    gene_act_header <- paste0(gene_act_header, sprintf('<th class="text-end">%s log2FC</th>', tp_name))
+  }
+}
+gene_act_header <- paste0(gene_act_header, '<th>Category</th>')
+
+temporal_tab <- ''
+if (has_temporal) {
+  temporal_tab <- paste0('
+<div class="tab-pane fade" id="temporal">
+  <ul class="nav nav-tabs mb-3" role="tablist">
+    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#temp-clusters" type="button">Clusters</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#temp-velocity" type="button">Velocity</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#temp-persist" type="button">Persistence</button></li>
+  </ul>
+  <div class="tab-content">
+    <!-- Clustering -->
+    <div class="tab-pane fade show active" id="temp-clusters">
+      <div class="row mb-3">
+        <div class="col-md-3">
+          <label class="form-label fw-bold">Cell Line:</label>
+          <select id="clusterCL" class="form-select">', cluster_select_opts, '</select>
+        </div>
+      </div>
+      <div id="clusterPlotly" style="height:450px"></div>
+      <h6 class="mt-3">Cluster Assignments <small class="text-muted">(top 1000 genes)</small></h6>
+      <div style="max-height:400px;overflow-y:auto">
+        <table class="table table-sm table-striped" id="clusterTable">
+          <thead><tr><th>Cell Line</th><th>Gene ID</th><th>Cluster</th><th>Score</th><th>Memberships</th></tr></thead>
+          <tbody>', cluster_tbl_rows, '</tbody>
+        </table>
+      </div>
+    </div>
+    <!-- Velocity -->
+    <div class="tab-pane fade" id="temp-velocity">
+      <div class="row">
+        <div class="col-md-6">
+          <h6>DEG Count per Time Point</h6>
+          <div id="velocityBar" style="height:400px"></div>
+        </div>
+        <div class="col-md-6">
+          <h6>Summary Table</h6>
+          <table class="table table-sm table-striped">
+            <thead><tr><th>Cell Line</th><th>Time</th><th>Up</th><th>Down</th><th>Total</th><th>Mean |log2FC|</th></tr></thead>
+            <tbody>', velocity_tbl_html, '</tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <!-- Persistence -->
+    <div class="tab-pane fade" id="temp-persist">
+      <h5>Gene Overlap (Venn/<i>UpSet</i>)</h5>
+      <div class="row">', overlap_html, '</div>
+      <h5 class="mt-3">Gene Activity Heatmaps <small class="text-muted">log2FC per timepoint, annotated by persistence category</small></h5>
+      <div class="row">', heat_html, '</div>
+      <h5 class="mt-3">Gene Activity Table <small class="text-muted">searchable, sortable — which gene is significant at which timepoint</small></h5>
+      <div class="row mb-3">
+        <div class="col-md-3">
+          <label class="form-label fw-bold">Filter by Cell Line:</label>
+          <select id="geneActCL" class="form-select">', gene_act_select, '</select>
+        </div>
+      </div>
+      <div style="max-height:500px;overflow-y:auto">
+        <table class="table table-sm table-striped" id="geneActTable">
+          <thead><tr>', gene_act_header, '</tr></thead>
+          <tbody>', gene_act_tbl_html, '</tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>')
+} else {
+  temporal_tab <- '
+<div class="tab-pane fade" id="temporal">
+  <div class="alert alert-info">Temporal kinetics analysis was not run. Check that the temporal analysis outputs exist.</div>
+</div>'
+}
+
 # --- Build head HTML manually (htmltools drops head tags) ---
 head_html <- sprintf('
 <head>
@@ -804,7 +1042,10 @@ body_html <- as.character(tags$body(
                       `data-bs-target` = "#overview", type = "button", "Overview")),
         tags$li(class = "nav-item",
           tags$button(class = "nav-link", id = "tab-pathways", `data-bs-toggle` = "tab",
-                      `data-bs-target` = "#pathways", type = "button", "Pathway Browser"))
+                      `data-bs-target` = "#pathways", type = "button", "Pathway Browser")),
+        tags$li(class = "nav-item",
+          tags$button(class = "nav-link", id = "tab-temporal", `data-bs-toggle` = "tab",
+                      `data-bs-target` = "#temporal", type = "button", "Temporal Kinetics"))
       ),
 
       tags$div(class = "tab-content",
@@ -861,7 +1102,9 @@ body_html <- as.character(tags$body(
           ),
           # Pathway cards
           HTML(all_cards)
-        )
+        ),
+        # Temporal Kinetics tab
+        HTML(temporal_tab)
       )
     ),
 
@@ -961,7 +1204,71 @@ document.getElementById("gseaDotplot").on("plotly_click", function(data) {
 </script>',
       jsonlite::toJSON(unname(dotplot_json), auto_unbox = TRUE, force = TRUE),
       jsonlite::toJSON(ct_summary_json, auto_unbox = TRUE, force = TRUE)
-    ))
+    )),
+    # Temporal analysis JavaScript
+    if (has_temporal) HTML(sprintf('<script>
+$(document).ready(function() {
+  var clusterRendered = false, velocityRendered = false;
+
+  function renderCluster() {
+    if (clusterRendered) return;
+    clusterRendered = true;
+    var allClusterData = %s;
+    var clusterLayout = {
+      title: "", xaxis: { title: "Time Point" }, yaxis: { title: "Mean VST Expression" },
+      height: 450, margin: { l: 60, r: 20, t: 30, b: 50 },
+      legend: { font: { size: 10 }, orientation: "h", y: 1.15 }
+    };
+    Plotly.newPlot("clusterPlotly", allClusterData, clusterLayout);
+  }
+
+  function renderVelocity() {
+    if (velocityRendered) return;
+    velocityRendered = true;
+    var velocityData = %s;
+    var velLayout = {
+      barmode: "group",
+      title: "", xaxis: { title: "Time Point" }, yaxis: { title: "Number of DEGs" },
+      height: 400, margin: { l: 60, r: 20, t: 30, b: 50 }
+    };
+    Plotly.newPlot("velocityBar", velocityData, velLayout);
+  }
+
+  // Render on tab activation for correct sizing
+  document.getElementById("tab-temporal").addEventListener("shown.bs.tab", function(e) {
+    renderCluster();
+    var innerTab = document.querySelector("#temporal .nav-link.active");
+    if (innerTab && innerTab.id) {
+      if (innerTab.getAttribute("data-bs-target") === "#temp-velocity") renderVelocity();
+    }
+  });
+
+  document.querySelectorAll("#temporal .nav-link").forEach(function(link) {
+    link.addEventListener("shown.bs.tab", function(e) {
+      if (e.target.getAttribute("data-bs-target") === "#temp-clusters") renderCluster();
+      if (e.target.getAttribute("data-bs-target") === "#temp-velocity") renderVelocity();
+    });
+  });
+
+  // DataTables
+  if (document.getElementById("clusterTable")) {
+    $("#clusterTable").DataTable({ pageLength: 25, searching: true, info: true,
+      lengthChange: false, order: [[3, "desc"]] });
+  }
+  if (document.getElementById("geneActTable")) {
+    var geneTable = $("#geneActTable").DataTable({
+      pageLength: 25, searching: true, info: true, lengthChange: false,
+      order: [] });
+    $("#geneActCL").on("change", function() {
+      var cl = $(this).val();
+      geneTable.column(1).search(cl).draw();
+    });
+  }
+});
+</script>',
+      cluster_plotly,
+      velocity_bar_json
+    )) else HTML("")
   ))
 
 # Combine into full HTML document

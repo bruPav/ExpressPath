@@ -9,12 +9,15 @@ factors:
     - id: "mock"
       label: "mock"
       short: "m"
+      temporal_order: 1
     - id: "1h"
       label: "1h"
       short: "1"
+      temporal_order: 2
     - id: "3h"
       label: "3h"
       short: "3"
+      temporal_order: 3
   treatment:
     id: "Ad26"
     label: "Ad26"
