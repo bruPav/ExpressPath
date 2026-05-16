@@ -16,7 +16,7 @@ pvalue_threshold: 0.05                               # alpha for significance
 
 # ─── Temporal Analysis ───
 temporal_n_clusters: 6                               # Number of Mfuzz clusters ("auto" for automatic)
-temporal_foldchange_threshold: 1                     # |log2FC| threshold for persistence/Venn classification
+temporal_foldchange_threshold: 0                     # |log2FC| threshold for persistence/Venn classification (0 disables)
 
 # ─── GSEA ───
 gsea_min_set_size: 15                                # Min genes in a KEGG pathway
