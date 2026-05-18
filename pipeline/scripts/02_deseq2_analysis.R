@@ -980,5 +980,485 @@ if (length(nonref_tps) >= 2) {
               sep = "\t", row.names = FALSE, quote = FALSE)
 }
 
+# --- 12. Part F: Cross-Cell-Line Comparison ---
+cat("\n=== Part F: Cross-Cell-Line Comparison ===\n")
+
+if (length(cl_ids) >= 2 && length(nonref_tps) >= 1) {
+
+  # Step F1: Build DEG sets for all cell lines × timepoints from combined results
+  all_deg_sets <- list()
+  all_lfc      <- list()
+  all_padj     <- list()
+
+  for (cl in cl_ids) {
+    all_deg_sets[[cl]] <- list()
+    all_lfc[[cl]]      <- list()
+    all_padj[[cl]]     <- list()
+    for (tp in nonref_tps) {
+      cname    <- paste0(cl, "_", tp, "_vs_mock")
+      padj_col <- paste0(cname, "_padj")
+      lfc_col  <- paste0(cname, "_log2FC")
+
+      if (!padj_col %in% colnames(combined) || !lfc_col %in% colnames(combined)) next
+
+      is_sig <- combined[[padj_col]] < alpha_val & !is.na(combined[[padj_col]])
+      if (temporal_fc_thresh > 0) {
+        is_sig <- is_sig & abs(combined[[lfc_col]]) >= temporal_fc_thresh
+      }
+
+      all_deg_sets[[cl]][[tp]] <- combined$gene_id[is_sig]
+
+      lfc_v  <- combined[[lfc_col]];  names(lfc_v)  <- combined$gene_id
+      padj_v <- combined[[padj_col]]; names(padj_v) <- combined$gene_id
+      all_lfc[[cl]][[tp]]  <- lfc_v
+      all_padj[[cl]][[tp]] <- padj_v
+    }
+  }
+
+  # Step F2: Process each timepoint
+  cross_shared_rows   <- list()
+  cross_specific_rows <- list()
+
+  for (tp in nonref_tps) {
+    cat(sprintf("\n  Timepoint: %s\n", tp))
+
+    cl_pairs <- combn(cl_ids, 2, simplify = FALSE)
+
+    for (pair in cl_pairs) {
+      cl_a <- pair[1]; cl_b <- pair[2]
+
+      deg_a <- all_deg_sets[[cl_a]][[tp]]
+      deg_b <- all_deg_sets[[cl_b]][[tp]]
+
+      if (is.null(deg_a) || is.null(deg_b)) next
+      if (length(deg_a) == 0 && length(deg_b) == 0) next
+
+      shared_genes <- intersect(deg_a, deg_b)
+      a_only <- setdiff(deg_a, deg_b)
+      b_only <- setdiff(deg_b, deg_a)
+
+      lfc_a_all  <- all_lfc[[cl_a]][[tp]]
+      lfc_b_all  <- all_lfc[[cl_b]][[tp]]
+      padj_a_all <- all_padj[[cl_a]][[tp]]
+      padj_b_all <- all_padj[[cl_b]][[tp]]
+
+      # --- Shared genes: concordance + magnitude classification ---
+      for (g in shared_genes) {
+        lfc_a  <- lfc_a_all[g]
+        lfc_b  <- lfc_b_all[g]
+        padj_a <- padj_a_all[g]
+        padj_b <- padj_b_all[g]
+        sym <- combined$gene_symbol[match(g, combined$gene_id)]
+
+        if (!is.na(lfc_a) && !is.na(lfc_b)) {
+          if (lfc_a > 0 && lfc_b > 0) {
+            conc <- "Concordant_Up"
+          } else if (lfc_a < 0 && lfc_b < 0) {
+            conc <- "Concordant_Down"
+          } else if (lfc_a > 0 && lfc_b < 0) {
+            conc <- paste0(cl_a, "_Up_", cl_b, "_Down")
+          } else if (lfc_a < 0 && lfc_b > 0) {
+            conc <- paste0(cl_a, "_Down_", cl_b, "_Up")
+          } else {
+            conc <- "Zero"
+          }
+        } else {
+          conc <- "NA"
+        }
+
+        abs_a <- abs(lfc_a); abs_b <- abs(lfc_b)
+        if (!is.na(abs_a) && !is.na(abs_b) && is.finite(abs_a) && is.finite(abs_b) &&
+            min(abs_a, abs_b) > 0) {
+          mag_ratio <- max(abs_a, abs_b) / min(abs_a, abs_b)
+        } else {
+          mag_ratio <- NA
+        }
+        mag_div <- !is.na(mag_ratio) && mag_ratio > 2
+
+        cross_shared_rows[[length(cross_shared_rows) + 1]] <- data.frame(
+          gene_id = g, gene_symbol = sym, timepoint = tp,
+          cell_line_1 = cl_a, cell_line_2 = cl_b,
+          log2FC_1 = round(lfc_a, 4), padj_1 = round(padj_a, 6),
+          log2FC_2 = round(lfc_b, 4), padj_2 = round(padj_b, 6),
+          concordance = conc,
+          magnitude_ratio = if (is.na(mag_ratio)) NA else round(mag_ratio, 3),
+          magnitude_divergent = mag_div,
+          stringsAsFactors = FALSE
+        )
+      }
+
+      # --- Cell-line-specific genes ---
+      for (g in a_only) {
+        lfc  <- lfc_a_all[g]
+        padj <- padj_a_all[g]
+        sym  <- combined$gene_symbol[match(g, combined$gene_id)]
+        dir  <- if (!is.na(lfc) && lfc > 0) "Up" else if (!is.na(lfc) && lfc < 0) "Down" else "Zero"
+        cross_specific_rows[[length(cross_specific_rows) + 1]] <- data.frame(
+          gene_id = g, gene_symbol = sym, timepoint = tp,
+          cell_line = cl_a, log2FC = round(lfc, 4), padj = round(padj, 6),
+          direction = dir, stringsAsFactors = FALSE
+        )
+      }
+      for (g in b_only) {
+        lfc  <- lfc_b_all[g]
+        padj <- padj_b_all[g]
+        sym  <- combined$gene_symbol[match(g, combined$gene_id)]
+        dir  <- if (!is.na(lfc) && lfc > 0) "Up" else if (!is.na(lfc) && lfc < 0) "Down" else "Zero"
+        cross_specific_rows[[length(cross_specific_rows) + 1]] <- data.frame(
+          gene_id = g, gene_symbol = sym, timepoint = tp,
+          cell_line = cl_b, log2FC = round(lfc, 4), padj = round(padj, 6),
+          direction = dir, stringsAsFactors = FALSE
+        )
+      }
+
+      # --- Console summary for this pair ---
+      n_up   <- sum(sapply(shared_genes, function(g) {
+        la <- lfc_a_all[g]; lb <- lfc_b_all[g]
+        !is.na(la) && !is.na(lb) && la > 0 && lb > 0 }))
+      n_down <- sum(sapply(shared_genes, function(g) {
+        la <- lfc_a_all[g]; lb <- lfc_b_all[g]
+        !is.na(la) && !is.na(lb) && la < 0 && lb < 0 }))
+      n_disc <- length(shared_genes) - n_up - n_down
+      n_mag  <- sum(sapply(shared_genes, function(g) {
+        la <- lfc_a_all[g]; lb <- lfc_b_all[g]
+        aa <- abs(la); ab <- abs(lb)
+        if (is.na(aa) || is.na(ab) || !is.finite(aa) || !is.finite(ab) || min(aa, ab) <= 0)
+          return(FALSE)
+        max(aa, ab) / min(aa, ab) > 2
+      }))
+
+      cat(sprintf("    %s vs %s: %d shared (%d down, %d up, %d discordant",
+                  cl_a, cl_b, length(shared_genes), n_down, n_up, n_disc))
+      if (n_mag > 0) cat(sprintf("; %d magnitude-divergent", n_mag))
+      cat(sprintf(")\n                %d %s-specific, %d %s-specific\n",
+                  length(a_only), cl_a, length(b_only), cl_b))
+    }
+  }
+
+  # Step F3: Write cross-cell-line output tables
+  if (length(cross_shared_rows) > 0) {
+    cross_shared_df <- do.call(rbind, cross_shared_rows)
+    write.table(cross_shared_df,
+                file = file.path(out_dir, "cross_cellline_shared.tsv"),
+                sep = "\t", row.names = FALSE, quote = FALSE)
+    cat(sprintf("\nWrote cross_cellline_shared.tsv (%d rows)\n", nrow(cross_shared_df)))
+  } else {
+    write.table(data.frame(gene_id = character(), gene_symbol = character(),
+                           timepoint = character(), cell_line_1 = character(),
+                           cell_line_2 = character(), log2FC_1 = numeric(),
+                           padj_1 = numeric(), log2FC_2 = numeric(),
+                           padj_2 = numeric(), concordance = character(),
+                           magnitude_ratio = numeric(), magnitude_divergent = logical(),
+                           stringsAsFactors = FALSE),
+                file = file.path(out_dir, "cross_cellline_shared.tsv"),
+                sep = "\t", row.names = FALSE, quote = FALSE)
+    cat("Wrote cross_cellline_shared.tsv (empty)\n")
+  }
+
+  if (length(cross_specific_rows) > 0) {
+    cross_specific_df <- do.call(rbind, cross_specific_rows)
+    write.table(cross_specific_df,
+                file = file.path(out_dir, "cross_cellline_specific.tsv"),
+                sep = "\t", row.names = FALSE, quote = FALSE)
+    cat(sprintf("Wrote cross_cellline_specific.tsv (%d rows)\n", nrow(cross_specific_df)))
+  } else {
+    write.table(data.frame(gene_id = character(), gene_symbol = character(),
+                           timepoint = character(), cell_line = character(),
+                           log2FC = numeric(), padj = numeric(),
+                           direction = character(), stringsAsFactors = FALSE),
+                file = file.path(out_dir, "cross_cellline_specific.tsv"),
+                sep = "\t", row.names = FALSE, quote = FALSE)
+    cat("Wrote cross_cellline_specific.tsv (empty)\n")
+  }
+
+  # Step F4: Cross-cell-line Venn + UpSet plots per timepoint
+  for (tp in nonref_tps) {
+    venn_sets <- lapply(cl_ids, function(cl) all_deg_sets[[cl]][[tp]])
+    names(venn_sets) <- cl_ids
+    venn_sets <- venn_sets[!sapply(venn_sets, is.null)]
+    venn_sets <- venn_sets[sapply(venn_sets, length) > 0]
+
+    if (length(venn_sets) < 2) next
+
+    if (length(venn_sets) == 2) {
+      cl_a <- names(venn_sets)[1]; cl_b <- names(venn_sets)[2]
+      shared <- intersect(venn_sets[[1]], venn_sets[[2]])
+      lfc_a <- all_lfc[[cl_a]][[tp]]; lfc_b <- all_lfc[[cl_b]][[tp]]
+      n_up <- sum(sapply(shared, function(g) {
+        la <- lfc_a[g]; lb <- lfc_b[g]
+        !is.na(la) && !is.na(lb) && la > 0 && lb > 0 }))
+      n_down <- sum(sapply(shared, function(g) {
+        la <- lfc_a[g]; lb <- lfc_b[g]
+        !is.na(la) && !is.na(lb) && la < 0 && lb < 0 }))
+
+      pdf(file.path(out_dir, paste0("cross_venn_", tp, ".pdf")), width = 8, height = 7)
+      grid.newpage()
+      draw.pairwise.venn(
+        area1 = length(venn_sets[[1]]), area2 = length(venn_sets[[2]]),
+        cross.area = length(shared),
+        category = c(cl_a, cl_b),
+        fill = c("#E41A1C", "#377EB8"), alpha = 0.5,
+        cex = 1.5, cat.cex = 1.3, cat.pos = c(-30, 30),
+        margin = 0.05
+      )
+      dev.off()
+
+      png(file.path(out_dir, paste0("cross_venn_", tp, ".png")),
+          width = 8, height = 7, units = "in", res = 150)
+      grid.newpage()
+      draw.pairwise.venn(
+        area1 = length(venn_sets[[1]]), area2 = length(venn_sets[[2]]),
+        cross.area = length(shared),
+        category = c(cl_a, cl_b),
+        fill = c("#E41A1C", "#377EB8"), alpha = 0.5,
+        cex = 1.5, cat.cex = 1.3, cat.pos = c(-30, 30),
+        margin = 0.05
+      )
+      dev.off()
+
+      cat(sprintf("Saved cross_venn_%s.pdf / .png\n", tp))
+    } else {
+      # UpSet for >2 cell lines
+      all_deg_genes <- unique(unlist(venn_sets))
+      upset_matrix <- as.data.frame(sapply(names(venn_sets), function(x) {
+        as.integer(all_deg_genes %in% venn_sets[[x]])
+      }))
+      rownames(upset_matrix) <- all_deg_genes
+
+      pdf(file.path(out_dir, paste0("cross_upset_", tp, ".pdf")), width = 10, height = 6)
+      print(upset(upset_matrix, intersect = colnames(upset_matrix),
+                  name = paste0("Cross-Cell-Line DEGs: ", tp),
+                  width_ratio = 0.3))
+      dev.off()
+      png(file.path(out_dir, paste0("cross_upset_", tp, ".png")),
+          width = 10, height = 6, units = "in", res = 150)
+      print(upset(upset_matrix, intersect = colnames(upset_matrix),
+                  name = paste0("Cross-Cell-Line DEGs: ", tp),
+                  width_ratio = 0.3))
+      dev.off()
+      cat(sprintf("Saved cross_upset_%s.pdf / .png\n", tp))
+    }
+  }
+
+  # Step F4b: Cross-cell-line log2FC scatter plots (one per timepoint)
+  for (tp in nonref_tps) {
+    cl_pairs <- combn(cl_ids, 2, simplify = FALSE)
+    for (pair in cl_pairs) {
+      cl_a <- pair[1]; cl_b <- pair[2]
+      deg_a <- all_deg_sets[[cl_a]][[tp]]
+      deg_b <- all_deg_sets[[cl_b]][[tp]]
+      if (is.null(deg_a) || is.null(deg_b)) next
+      if (length(deg_a) == 0 && length(deg_b) == 0) next
+
+      lfc_a_all  <- all_lfc[[cl_a]][[tp]]
+      lfc_b_all  <- all_lfc[[cl_b]][[tp]]
+      padj_a_all <- all_padj[[cl_a]][[tp]]
+      padj_b_all <- all_padj[[cl_b]][[tp]]
+
+      # Build scatter data: all DEGs in either cell line
+      all_degs <- union(deg_a, deg_b)
+      scatter_df <- data.frame(
+        gene_id = all_degs,
+        log2FC_a = lfc_a_all[all_degs],
+        log2FC_b = lfc_b_all[all_degs],
+        stringsAsFactors = FALSE
+      )
+      scatter_df$gene_symbol <- combined$gene_symbol[match(scatter_df$gene_id, combined$gene_id)]
+      scatter_df$shared  <- scatter_df$gene_id %in% intersect(deg_a, deg_b)
+      scatter_df$a_only  <- scatter_df$gene_id %in% setdiff(deg_a, deg_b)
+      scatter_df$b_only  <- scatter_df$gene_id %in% setdiff(deg_b, deg_a)
+
+      # For shared genes, determine concordance
+      scatter_df$concordance <- "Specific"
+      scatter_df$magnitude_divergent <- FALSE
+      scatter_df$label <- ""
+
+      shared_ids <- intersect(deg_a, deg_b)
+      for (g in shared_ids) {
+        la <- lfc_a_all[g]; lb <- lfc_b_all[g]
+        if (!is.na(la) && !is.na(lb)) {
+          if (la > 0 && lb > 0) scatter_df$concordance[scatter_df$gene_id == g] <- "Up"
+          else if (la < 0 && lb < 0) scatter_df$concordance[scatter_df$gene_id == g] <- "Down"
+          else scatter_df$concordance[scatter_df$gene_id == g] <- "Discordant"
+        }
+        # Magnitude
+        aa <- abs(la); ab <- abs(lb)
+        if (!is.na(aa) && !is.na(ab) && is.finite(aa) && is.finite(ab) && min(aa, ab) > 0) {
+          mr <- max(aa, ab) / min(aa, ab)
+          scatter_df$magnitude_divergent[scatter_df$gene_id == g] <- (mr > 2)
+        }
+      }
+
+      # Label magnitude-divergent shared genes
+      scatter_df$label[scatter_df$magnitude_divergent] <- scatter_df$gene_symbol[scatter_df$magnitude_divergent]
+
+      # Counts for legend
+      n_shared_up   <- sum(scatter_df$concordance == "Up")
+      n_shared_down <- sum(scatter_df$concordance == "Down")
+      n_discordant  <- sum(scatter_df$concordance == "Discordant")
+      n_specific_a  <- sum(scatter_df$a_only)
+      n_specific_b  <- sum(scatter_df$b_only)
+
+      # Axis limits: symmetric around 0
+      max_abs <- max(abs(c(scatter_df$log2FC_a, scatter_df$log2FC_b)), na.rm = TRUE)
+      lim <- max_abs * 1.15
+      if (!is.finite(lim) || lim == 0) lim <- 5
+
+      scatter_df$pt_color <- NA
+      scatter_df$pt_color[scatter_df$concordance == "Up"]   <- "#E41A1C"
+      scatter_df$pt_color[scatter_df$concordance == "Down"] <- "#377EB8"
+      scatter_df$pt_color[scatter_df$concordance == "Discordant"] <- "#FF7F00"
+      scatter_df$pt_color[scatter_df$concordance == "Specific"]   <- "grey70"
+      scatter_df$pt_color[is.na(scatter_df$pt_color)] <- "grey70"
+
+      scatter_df$pt_size <- ifelse(scatter_df$concordance == "Specific", 0.8, 1.5)
+      scatter_df$pt_alpha <- ifelse(scatter_df$concordance == "Specific", 0.4, 0.7)
+
+      scatter_df <- scatter_df[order(scatter_df$concordance == "Specific"), ]
+
+      p <- ggplot(scatter_df, aes(x = log2FC_a, y = log2FC_b)) +
+        geom_hline(yintercept = 0, color = "grey60", linewidth = 0.4) +
+        geom_vline(xintercept = 0, color = "grey60", linewidth = 0.4) +
+        geom_abline(slope = 1, intercept = 0, color = "grey40", linetype = "dashed", linewidth = 0.5) +
+        geom_point(aes(color = pt_color), size = scatter_df$pt_size, alpha = scatter_df$pt_alpha) +
+        scale_color_identity(
+          guide = guide_legend(title = NULL),
+          labels = c(
+            "#E41A1C" = paste0("Both up (n=", n_shared_up, ")"),
+            "#377EB8" = paste0("Both down (n=", n_shared_down, ")"),
+            "#FF7F00" = paste0("Discordant (n=", n_discordant, ")"),
+            "grey70" = paste0(cl_a, "-specific (", n_specific_a, ") / ", cl_b, "-specific (", n_specific_b, ")")
+          ),
+          breaks = c("#E41A1C", "#377EB8", "#FF7F00", "grey70")
+        ) +
+        geom_text_repel(aes(label = label), size = 3, max.overlaps = 25,
+                        box.padding = 0.5, point.padding = 0.3, na.rm = TRUE) +
+        coord_fixed(xlim = c(-lim, lim), ylim = c(-lim, lim)) +
+        labs(
+          x = paste0(cl_a, " log2FC"), y = paste0(cl_b, " log2FC"),
+          title = paste0("Cross-Cell-Line DE: ", tp),
+          subtitle = paste0("Shared: ", n_shared_up + n_shared_down + n_discordant,
+                            " genes (", n_shared_up, " up, ", n_shared_down, " down",
+                            if (n_discordant > 0) paste0(", ", n_discordant, " discordant") else "",
+                            ")")
+        ) +
+        theme_minimal(base_size = 13) +
+        theme(legend.position = "bottom",
+              panel.grid.minor = element_blank())
+
+      pdf(file.path(out_dir, paste0("cross_scatter_", tp, ".pdf")), width = 8, height = 7.5)
+      print(p)
+      dev.off()
+      png(file.path(out_dir, paste0("cross_scatter_", tp, ".png")),
+          width = 8, height = 7.5, units = "in", res = 150)
+      print(p)
+      dev.off()
+      cat(sprintf("Saved cross_scatter_%s.pdf / .png\n", tp))
+    }
+  }
+
+  # Step F5: Cross-cell-line persistence table (from existing persist_df)
+  if (exists("persist_df") && !is.null(persist_df) && nrow(persist_df) > 0) {
+    cross_persist <- persist_df[, c("gene_id", "cell_line", "category")]
+    cross_persist$gene_symbol <- combined$gene_symbol[match(cross_persist$gene_id, combined$gene_id)]
+    cross_persist <- cross_persist[, c("gene_id", "gene_symbol", "cell_line", "category")]
+
+    write.table(cross_persist,
+                file = file.path(out_dir, "cross_persistence.tsv"),
+                sep = "\t", row.names = FALSE, quote = FALSE)
+    cat(sprintf("Wrote cross_persistence.tsv (%d rows)\n", nrow(cross_persist)))
+
+    # Summary: concordance of persistence categories between cell lines
+    cl_u <- unique(cross_persist$cell_line)
+    if (length(cl_u) >= 2) {
+      persist_wide <- reshape(cross_persist, idvar = c("gene_id", "gene_symbol"),
+                              timevar = "cell_line", direction = "wide")
+      cat_cols <- grep("^category\\.", colnames(persist_wide), value = TRUE)
+      if (length(cat_cols) >= 2) {
+        valid <- complete.cases(persist_wide[, cat_cols, drop = FALSE])
+        n_same <- sum(persist_wide[valid, cat_cols[1]] == persist_wide[valid, cat_cols[2]])
+        n_diff <- sum(valid) - n_same
+        cat(sprintf("Cross persistence agreement: %d same, %d different (out of %d genes with categories in both)\n",
+                    n_same, n_diff, sum(valid)))
+
+        # --- Cross-persistence contingency heatmap ---
+        if (sum(valid) >= 3) {
+          tab <- table(
+            factor(persist_wide[valid, cat_cols[1]],
+                   levels = c("Transient", "Secondary_Deferred", "Sustained",
+                              "Partially_Sustained", "Transient_Mid", "Complex")),
+            factor(persist_wide[valid, cat_cols[2]],
+                   levels = c("Transient", "Secondary_Deferred", "Sustained",
+                              "Partially_Sustained", "Transient_Mid", "Complex"))
+          )
+          # Remove all-zero rows and columns
+          tab <- tab[rowSums(tab) > 0, colSums(tab) > 0, drop = FALSE]
+
+          if (nrow(tab) >= 1 && ncol(tab) >= 1) {
+            cl_a_name <- cl_u[1]; cl_b_name <- cl_u[2]
+            rownames(tab) <- paste0(cl_a_name, ": ", rownames(tab))
+            colnames(tab) <- paste0(cl_b_name, ": ", colnames(tab))
+
+            # pheatmap with counts displayed
+            pdf(file.path(out_dir, "cross_persistence_heatmap.pdf"),
+                width = max(5, 1 + ncol(tab) * 1.8),
+                height = max(3.5, 1 + nrow(tab) * 0.8))
+            pheatmap(tab,
+                     cluster_rows = FALSE, cluster_cols = FALSE,
+                     display_numbers = TRUE, number_format = "%d",
+                     number_color = "black",
+                     color = colorRampPalette(c("white", "#4DAF4A", "#377EB8"))(100),
+                     main = "Cross-Cell-Line Persistence Categories",
+                     fontsize = 12, fontsize_number = 11,
+                     legend = TRUE, legend_breaks = seq(0, max(tab), length.out = 5),
+                     legend_labels = as.character(round(seq(0, max(tab), length.out = 5))),
+                     border_color = "grey80")
+            dev.off()
+            png(file.path(out_dir, "cross_persistence_heatmap.png"),
+                width = max(5, 1 + ncol(tab) * 1.8),
+                height = max(3.5, 1 + nrow(tab) * 0.8),
+                units = "in", res = 150)
+            pheatmap(tab,
+                     cluster_rows = FALSE, cluster_cols = FALSE,
+                     display_numbers = TRUE, number_format = "%d",
+                     number_color = "black",
+                     color = colorRampPalette(c("white", "#4DAF4A", "#377EB8"))(100),
+                     main = "Cross-Cell-Line Persistence Categories",
+                     fontsize = 12, fontsize_number = 11,
+                     legend = TRUE, legend_breaks = seq(0, max(tab), length.out = 5),
+                     legend_labels = as.character(round(seq(0, max(tab), length.out = 5))),
+                     border_color = "grey80")
+            dev.off()
+            cat("Saved cross_persistence_heatmap.pdf / .png\n")
+          }
+        }
+      }
+    }
+  }
+
+} else {
+  cat("Fewer than 2 cell lines or no non-reference timepoints; skipping cross-cell-line analysis.\n")
+  write.table(data.frame(gene_id = character(), gene_symbol = character(),
+                         timepoint = character(), cell_line_1 = character(),
+                         cell_line_2 = character(), log2FC_1 = numeric(),
+                         padj_1 = numeric(), log2FC_2 = numeric(),
+                         padj_2 = numeric(), concordance = character(),
+                         magnitude_ratio = numeric(), magnitude_divergent = logical(),
+                         stringsAsFactors = FALSE),
+              file = file.path(out_dir, "cross_cellline_shared.tsv"),
+              sep = "\t", row.names = FALSE, quote = FALSE)
+  write.table(data.frame(gene_id = character(), gene_symbol = character(),
+                         timepoint = character(), cell_line = character(),
+                         log2FC = numeric(), padj = numeric(),
+                         direction = character(), stringsAsFactors = FALSE),
+              file = file.path(out_dir, "cross_cellline_specific.tsv"),
+              sep = "\t", row.names = FALSE, quote = FALSE)
+  write.table(data.frame(gene_id = character(), gene_symbol = character(),
+                         cell_line = character(), category = character(),
+                         stringsAsFactors = FALSE),
+              file = file.path(out_dir, "cross_persistence.tsv"),
+              sep = "\t", row.names = FALSE, quote = FALSE)
+}
+
 cat("\n=== Analysis Complete ===\n")
 cat(sprintf("All outputs in: %s/\n", out_dir))
