@@ -446,12 +446,307 @@ if (nrow(sig_tfs) > 0) {
            fontsize_col      = 10,
            border_color      = "grey80",
            legend_breaks     = seq(0, ceiling(max_val), by = 1),
-           legend_labels     = seq(0, ceiling(max_val), by = 1),
            name              = "-log10(adj.p)")
   dev.off()
   cat(sprintf("Saved tf_enrichment_heatmap.pdf / .png\n"))
 } else {
   cat("No TFs with library-level adj.p < 0.05; skipping heatmap.\n")
+}
+
+# --- 8b. TF-Gene Regulatory Network ---
+cat("\n=== TF-Gene Regulatory Network ===\n")
+
+sig_net <- results_df[results_df$adj_pvalue < 0.05, ]
+n_sig_tfs <- length(unique(sig_net$TF))
+
+if (nrow(sig_net) > 0 && n_sig_tfs >= 1) {
+  suppressPackageStartupMessages({
+    library("igraph")
+    library("ggraph")
+    library("tidygraph")
+    library("visNetwork")
+  })
+
+  # Build edge list: TF → gene_symbol from enrichment genes column
+  edge_list <- list()
+  for (i in seq_len(nrow(sig_net))) {
+    tf_name <- sig_net$TF[i]
+    gene_str <- sig_net$genes[i]
+    if (is.na(gene_str) || gene_str == "") next
+    gene_syms <- strsplit(gene_str, ";")[[1]]
+    gene_syms <- trimws(gene_syms)
+    gene_syms <- gene_syms[gene_syms != ""]
+    for (gs in gene_syms) {
+      edge_list[[length(edge_list) + 1]] <- data.frame(
+        from = tf_name,
+        to = gs,
+        gene_set = sig_net$gene_set[i],
+        combined_score = sig_net$combined_score[i],
+        adj_pvalue = sig_net$adj_pvalue[i],
+        stringsAsFactors = FALSE
+      )
+    }
+  }
+  edges_df <- do.call(rbind, edge_list)
+  cat(sprintf("Edges: %d TF→gene relationships\n", nrow(edges_df)))
+
+  # Build node list: all unique TFs and target genes
+  tf_nodes <- unique(sig_net$TF)
+  gene_nodes <- setdiff(unique(edges_df$to), tf_nodes)
+
+  # TF node attributes
+  tf_df <- data.frame(
+    name = tf_nodes,
+    type = "TF",
+    stringsAsFactors = FALSE
+  )
+  # Best library and significance per TF
+  tf_best <- sig_net %>%
+    group_by(TF) %>%
+    summarise(
+      best_library = first(library),
+      best_adjp    = min(adj_pvalue),
+      best_score   = max(combined_score, na.rm = TRUE),
+      .groups = "drop"
+    )
+  tf_df$library <- tf_best$best_library[match(tf_df$name, tf_best$TF)]
+  tf_df$adj_pvalue <- tf_best$best_adjp[match(tf_df$name, tf_best$TF)]
+  tf_df$combined_score <- tf_best$best_score[match(tf_df$name, tf_best$TF)]
+  tf_df$node_size <- -log10(tf_df$adj_pvalue)
+  tf_df$node_size[!is.finite(tf_df$node_size)] <- 3
+
+  # Look up TF expression
+  tf_df$is_DEG <- tf_expr_info$TF_is_DEG[match(tf_df$name, tf_expr_info$TF)]
+  tf_df$is_DEG[is.na(tf_df$is_DEG)] <- FALSE
+
+  # Gene node attributes: look up expression in combined_results
+  gene_df <- data.frame(
+    name = gene_nodes,
+    type = "Gene",
+    stringsAsFactors = FALSE
+  )
+
+  # For each gene, find its best direction and persistence
+  gene_df$direction <- "Mixed"
+  gene_df$is_DEG    <- FALSE
+  gene_df$log2FC     <- NA_real_
+  gene_df$persistence <- ""
+
+  for (i in seq_len(nrow(gene_df))) {
+    sym <- gene_df$name[i]
+    row <- combined_expr[combined_expr$gene_symbol == sym, ]
+    if (nrow(row) == 0) next
+
+    # Best comparison by padj
+    padj_vals <- as.numeric(unlist(row[1, padj_cols]))
+    lfc_vals  <- as.numeric(unlist(row[1, lfc_cols]))
+    if (all(is.na(padj_vals))) next
+
+    best_idx <- which.min(padj_vals)
+    if (length(best_idx) == 0 || is.na(padj_vals[best_idx])) next
+
+    gene_df$log2FC[i]  <- lfc_vals[best_idx]
+    gene_df$is_DEG[i]  <- padj_vals[best_idx] < 0.05
+
+    if (lfc_vals[best_idx] > 0) {
+      gene_df$direction[i] <- "Up"
+    } else if (lfc_vals[best_idx] < 0) {
+      gene_df$direction[i] <- "Down"
+    }
+  }
+
+  # Persistence from persist_df
+  if (exists("persist_df") && nrow(persist_df) > 0) {
+    gene_ids <- annot$gene_id[match(gene_df$name, annot$gene_symbol)]
+    names(gene_ids) <- gene_df$name
+    for (i in seq_len(nrow(gene_df))) {
+      gid <- gene_ids[i]
+      if (!is.na(gid)) {
+        cats <- unique(persist_df$category[persist_df$gene_id == gid])
+        if (length(cats) == 1) gene_df$persistence[i] <- cats[1]
+        else if (length(cats) > 1) gene_df$persistence[i] <- paste(cats, collapse = "/")
+      }
+    }
+  }
+  gene_df$persistence[gene_df$persistence == ""] <- "Unknown"
+
+  # Node degree (hub score)
+  gene_degree <- table(edges_df$to)
+  gene_df$degree <- as.integer(gene_degree[gene_df$name])
+  gene_df$degree[is.na(gene_df$degree)] <- 0
+
+  tf_degree <- table(edges_df$from)
+  tf_df$degree <- as.integer(tf_degree[tf_df$name])
+  tf_df$degree[is.na(tf_df$degree)] <- 0
+
+  # Combine nodes
+  tf_df$direction   <- NA_character_
+  tf_df$log2FC      <- NA_real_
+  tf_df$persistence <- ""
+  gene_df$library <- NA_character_
+  gene_df$node_size <- 3
+  gene_df$adj_pvalue <- NA_real_
+  gene_df$combined_score <- NA_real_
+
+  all_nodes <- rbind(
+    tf_df[, c("name", "type", "library", "direction", "is_DEG", "log2FC",
+              "persistence", "node_size", "adj_pvalue", "combined_score", "degree")],
+    gene_df[, c("name", "type", "library", "direction", "is_DEG", "log2FC",
+                "persistence", "node_size", "adj_pvalue", "combined_score", "degree")]
+  )
+
+  # Build igraph
+  g <- graph_from_data_frame(edges_df[, c("from", "to", "gene_set", "combined_score")],
+                             vertices = all_nodes, directed = TRUE)
+
+  # Community detection
+  comm <- cluster_louvain(as.undirected(g))
+  V(g)$community <- comm$membership
+  n_comm <- length(unique(comm$membership))
+  cat(sprintf("Nodes: %d (TFs=%d, genes=%d) in %d communities\n",
+              vcount(g), sum(V(g)$type == "TF"), sum(V(g)$type == "Gene"), n_comm))
+
+  # Community summary
+  for (cid in sort(unique(comm$membership))) {
+    members <- V(g)$name[V(g)$community == cid]
+    tfs_in_c   <- intersect(members, tf_nodes)
+    genes_in_c <- intersect(members, gene_nodes)
+    cat(sprintf("  Community %d: TFs=[%s] + %d genes\n",
+                cid, paste(tfs_in_c, collapse = ", "), length(genes_in_c)))
+  }
+
+  # --- Static network plot (ggraph) ---
+  g_tidy <- as_tbl_graph(g)
+
+  direction_colors <- c("Up" = "#E41A1C", "Down" = "#377EB8",
+                        "Mixed" = "grey70", "Unknown" = "grey70")
+  lib_colors_net <- c("ChEA_2016" = "#E41A1C",
+                      "ENCODE_and_ChEA_Consensus_TFs_from_ChIP-X" = "#377EB8",
+                      "TRANSFAC_and_JASPAR_PWMs" = "#4DAF4A",
+                      "ARCHS4_TFs_Coexp" = "#FF7F00")
+
+  short_lib_net <- c("ChEA_2016" = "ChEA",
+                     "ENCODE_and_ChEA_Consensus_TFs_from_ChIP-X" = "ENCODE+ChEA",
+                     "TRANSFAC_and_JASPAR_PWMs" = "JASPAR",
+                     "ARCHS4_TFs_Coexp" = "ARCHS4")
+
+  V(g_tidy)$library_short <- short_lib_net[V(g_tidy)$library]
+
+  set.seed(42)
+  p_net <- ggraph(g_tidy, layout = "fr") +
+    # Edges
+    geom_edge_link(
+      aes(width = combined_score, alpha = combined_score),
+      color = "grey60"
+    ) +
+    scale_edge_width(range = c(0.15, 1.2), guide = "none") +
+    scale_edge_alpha(range = c(0.15, 0.6), guide = "none") +
+    # Gene nodes
+    geom_node_point(
+      data = function(x) x[x$type == "Gene", ],
+      aes(fill = direction, shape = persistence, size = degree + 1,
+          stroke = ifelse(is_DEG, 1.2, 0.3)),
+      color = "grey40"
+    ) +
+    # TF nodes
+    geom_node_point(
+      data = function(x) x[x$type == "TF", ],
+      aes(fill = library_short, size = node_size, stroke = ifelse(is_DEG, 1.5, 0.3)),
+      shape = 21, color = "black"
+    ) +
+    # Labels
+    geom_node_text(
+      aes(label = name, filter = (type == "TF" | degree >= 3)),
+      size = 2.5, repel = TRUE, max.overlaps = 50,
+      box.padding = 0.3, point.padding = 0.2, segment.color = "grey70"
+    ) +
+    scale_fill_manual(
+      values = c(direction_colors, lib_colors_net),
+      breaks = c("Up", "Down", "ChEA", "ENCODE+ChEA", "JASPAR", "ARCHS4"),
+      na.value = "grey50",
+      guide = guide_legend(title = "Direction / Library", override.aes = list(size = 4))
+    ) +
+    scale_shape_manual(
+      values = c("Transient" = 21, "Sustained" = 24, "Secondary_Deferred" = 22,
+                 "Unknown" = 1),
+      guide = guide_legend(title = "Persistence", override.aes = list(fill = "grey50"))
+    ) +
+    scale_size_continuous(range = c(1, 8), guide = "none") +
+    labs(
+      title = "TF → Target Gene Regulatory Network",
+      subtitle = paste0(n_sig_tfs, " enriched TFs, ", length(gene_nodes),
+                       " target genes, ", nrow(edges_df), " edges, ", n_comm, " modules"),
+      caption = "Gene: red=up, blue=down · Shape: persistence · TF: library color · Community: see console"
+    ) +
+    theme_graph(base_family = "sans") +
+    theme(legend.position = "bottom")
+
+  ggsave(file.path(out_dir, "tf", "tf_regulatory_network.pdf"), p_net,
+         width = 14, height = 12)
+  ggsave(file.path(out_dir, "tf", "tf_regulatory_network.png"), p_net,
+         width = 14, height = 12, dpi = 150)
+  cat("Saved tf_regulatory_network.pdf / .png\n")
+
+  # --- Interactive network (visNetwork) ---
+  vis_nodes <- data.frame(
+    id = V(g)$name,
+    label = V(g)$name,
+    group = ifelse(V(g)$type == "TF", "TF", V(g)$direction),
+    title = ifelse(V(g)$type == "TF",
+      paste0(V(g)$name, "\n",
+             "Library: ", short_lib_net[V(g)$library],
+             "\np-value: ", formatC(V(g)$adj_pvalue, format = "e", digits = 2),
+             "\nTargets: ", V(g)$degree),
+      paste0(V(g)$name, "\n",
+             "Direction: ", V(g)$direction,
+             ifelse(!is.na(V(g)$log2FC), paste0("\nlog2FC: ", round(V(g)$log2FC, 3)), ""),
+             "\nPersistence: ", V(g)$persistence,
+             ifelse(V(g)$is_DEG, "\n[IS DEG]", ""),
+             "\nDegree: ", V(g)$degree)
+    ),
+    shape = ifelse(V(g)$type == "TF", "dot", "triangle"),
+    size = ifelse(V(g)$type == "TF", V(g)$node_size * 3, (V(g)$degree + 1) * 3),
+    stringsAsFactors = FALSE
+  )
+
+  vis_edges <- data.frame(
+    from = edges_df$from,
+    to   = edges_df$to,
+    title = paste0("Score: ", round(edges_df$combined_score, 1),
+                   "\nGene set: ", edges_df$gene_set),
+    value = pmin(edges_df$combined_score / 10, 5),
+    stringsAsFactors = FALSE
+  )
+
+  vis_net <- visNetwork(vis_nodes, vis_edges, width = "100%", height = "800px") %>%
+    visGroups(groupname = "TF", color = list(background = "#FF7F00", border = "black"),
+              shape = "dot") %>%
+    visGroups(groupname = "Up", color = list(background = "#E41A1C", border = "grey40"),
+              shape = "triangle") %>%
+    visGroups(groupname = "Down", color = list(background = "#377EB8", border = "grey40"),
+              shape = "triangle") %>%
+    visGroups(groupname = "Mixed", color = list(background = "grey70", border = "grey40"),
+              shape = "triangle") %>%
+    visOptions(highlightNearest = list(enabled = TRUE, degree = 1, hover = TRUE),
+               nodesIdSelection = TRUE) %>%
+    visPhysics(solver = "forceAtlas2Based", stabilization = list(iterations = 200)) %>%
+    visLayout(randomSeed = 42) %>%
+    visLegend(width = 0.2, position = "right",
+              main = "Node types",
+              useGroups = FALSE,
+              addNodes = list(
+                list(label = "TF (enriched)", shape = "dot", color = "#FF7F00", size = 20),
+                list(label = "Gene up", shape = "triangle", color = "#E41A1C", size = 15),
+                list(label = "Gene down", shape = "triangle", color = "#377EB8", size = 15),
+                list(label = "Mixed/unknown", shape = "triangle", color = "grey70", size = 15)
+              ))
+
+  visSave(vis_net, file.path(out_dir, "tf", "tf_regulatory_network.html"),
+          selfcontained = TRUE)
+  cat("Saved tf_regulatory_network.html\n")
+
+} else {
+  cat("Not enough significant TFs for network visualization.\n")
 }
 
 # --- 9. Summary ---
