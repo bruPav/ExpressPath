@@ -48,7 +48,7 @@ pathview_dir <- normalizePath(file.path(out_dir, "pathview_maps"), mustWork = FA
 dir.create(pathview_dir, showWarnings = FALSE, recursive = TRUE)
 # --- Load DESeq2 results ---
 cat("\nLoading DESeq2 combined results...\n")
-combined <- read.delim(file.path(results_dir, "combined_results.tsv"),
+combined <- read.delim(file.path(results_dir, "tables", "combined_results.tsv"),
                        stringsAsFactors = FALSE, check.names = FALSE)
 cat(sprintf("  %d genes loaded\n", nrow(combined)))
 

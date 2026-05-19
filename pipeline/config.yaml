@@ -21,3 +21,10 @@ temporal_foldchange_threshold: 0                     # |log2FC| threshold for pe
 # ─── GSEA ───
 gsea_min_set_size: 15                                # Min genes in a KEGG pathway
 gsea_max_set_size: 500                               # Max genes in a KEGG pathway
+
+# ─── TF Target Enrichment (enrichR) ───
+enrichr_databases:                                     # Enrichr gene-set libraries to query
+  - "ChEA_2016"                                        #   ChIP-seq experiments from ChEA
+  - "ENCODE_and_ChEA_Consensus_TFs_from_ChIP-X"        #   Consensus ENCODE + ChEA TF targets
+  - "TRANSFAC_and_JASPAR_PWMs"                         #   TF binding motif predictions
+  - "ARCHS4_TFs_Coexp"                                 #   Co-expression based TF-gene links

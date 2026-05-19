@@ -51,20 +51,20 @@ main_wd <- getwd()
 # 1. Load data
 # =============================================
 cat("Loading data...\n")
-combined <- read.delim(file.path(results_dir, "combined_results.tsv"),
+combined <- read.delim(file.path(results_dir, "tables", "combined_results.tsv"),
                        stringsAsFactors = FALSE, check.names = FALSE)
-metadata <- read.delim(file.path(results_dir, "metadata.tsv"),
+metadata <- read.delim(file.path(results_dir, "tables", "metadata.tsv"),
                        stringsAsFactors = FALSE)
 gsea_kegg <- read.delim(file.path(out_dir, "gsea_kegg_signif.tsv"),
                         stringsAsFactors = FALSE)
 
 # Load temporal analysis results
-cluster_assign <- tryRead(file.path(results_dir, "cluster_assignments.tsv"))
-cluster_prof  <- tryRead(file.path(results_dir, "cluster_mean_profiles.tsv"))
-velocity      <- tryRead(file.path(results_dir, "velocity_summary.tsv"))
-venn_genes    <- tryRead(file.path(results_dir, "venn_genelists.tsv"))
-persist       <- tryRead(file.path(results_dir, "persistence_classes.tsv"))
-gene_activity <- tryRead(file.path(results_dir, "gene_activity.tsv"))
+cluster_assign <- tryRead(file.path(results_dir, "temporal", "cluster_assignments.tsv"))
+cluster_prof  <- tryRead(file.path(results_dir, "temporal", "cluster_mean_profiles.tsv"))
+velocity      <- tryRead(file.path(results_dir, "temporal", "velocity_summary.tsv"))
+venn_genes    <- tryRead(file.path(results_dir, "temporal", "venn_genelists.tsv"))
+persist       <- tryRead(file.path(results_dir, "temporal", "persistence_classes.tsv"))
+gene_activity <- tryRead(file.path(results_dir, "temporal", "gene_activity.tsv"))
 
 # Map ENSG -> ENTREZ
 ensg_ids <- combined$gene_id
@@ -850,15 +850,15 @@ venn_imgs <- list()
 heat_imgs <- list()
 for (cl in cl_ids) {
   # Try Venn first, then UpSet
-  png_path <- file.path(results_dir, paste0("venn_plot_", cl, ".png"))
+  png_path <- file.path(results_dir, "temporal", paste0("venn_plot_", cl, ".png"))
   if (!file.exists(png_path)) {
-    png_path <- file.path(results_dir, paste0("upset_plot_", cl, ".png"))
+    png_path <- file.path(results_dir, "temporal", paste0("upset_plot_", cl, ".png"))
   }
   if (file.exists(png_path)) {
     venn_imgs[[cl]] <- base64encode(readBin(png_path, "raw", file.info(png_path)$size))
   }
   # Heatmap
-  heat_path <- file.path(results_dir, paste0("gene_activity_heatmap_", cl, ".png"))
+  heat_path <- file.path(results_dir, "temporal", paste0("gene_activity_heatmap_", cl, ".png"))
   if (file.exists(heat_path)) {
     heat_imgs[[cl]] <- base64encode(readBin(heat_path, "raw", file.info(heat_path)$size))
   }

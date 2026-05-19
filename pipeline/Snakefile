@@ -1,7 +1,7 @@
 #!/usr/bin/env snakemake
 #
 # RNA-Seq Time Course Analysis Pipeline
-# DESeq2 → GSEA → Pathview → Interactive HTML Report
+# DESeq2 → GSEA → Pathview → TF Enrichment → Interactive HTML Report
 #
 
 import os
@@ -12,7 +12,7 @@ from datetime import datetime
 
 configfile: "config.yaml"
 
-# ─── Load design ───
+# --- Load design ---
 design_path = config.get("design", "../data/design.yaml")
 if not os.path.exists(design_path):
     sys.exit(f"ERROR: {design_path} not found.\n"
@@ -22,7 +22,7 @@ with open(design_path) as f:
     design = yaml.safe_load(f)
 design_json = json.dumps(design)
 
-# ─── Read TSV path from design (single source of truth) ───
+# --- Read TSV path from design (single source of truth) ---
 tsv_filename = design.get("source_tsv")
 if not tsv_filename:
     sys.exit(f"ERROR: {design_path} has no 'source_tsv' field.\n"
@@ -33,86 +33,118 @@ if not os.path.exists(input_tsv_path):
     sys.exit(f"ERROR: {input_tsv_path} not found.\n"
              f"  Make sure '{tsv_filename}' is in your data/ folder alongside design.yaml.")
 
-# ─── Resolve run_id ───
+# --- Resolve run_id ---
 run_id_raw = config.get("run_id", "auto")
 if run_id_raw == "auto":
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
 else:
     run_id = run_id_raw
 
-# ─── Resolved params ───
+# --- Resolved params ---
 count_filter_val  = config.get("count_filter_threshold", 10)
 pvalue_val        = config.get("pvalue_threshold", 0.05)
 temporal_n_clus   = config.get("temporal_n_clusters", 6)
 temporal_fc_thr   = config.get("temporal_foldchange_threshold", 1)
 gsea_min_val      = config.get("gsea_min_set_size", 15)
 gsea_max_val      = config.get("gsea_max_set_size", 500)
+enrichr_dbs       = config.get("enrichr_databases", [
+    "ChEA_2016",
+    "ENCODE_and_ChEA_Consensus_TFs_from_ChIP-X",
+    "TRANSFAC_and_JASPAR_PWMs",
+    "ARCHS4_TFs_Coexp"
+])
+enrichr_dbs_str   = ",".join(enrichr_dbs)
 
-# ─── Paths ───
-out_dir         = f"../results/{run_id}"
-counts_file     = f"{out_dir}/counts_matrix.tsv"
-metadata_file   = f"{out_dir}/metadata.tsv"
-annot_file      = f"{out_dir}/gene_annotations.tsv"
-combined_file   = f"{out_dir}/combined_results.tsv"
-signif_file     = f"{out_dir}/signif_lrt.tsv"
-signif_fc_file  = f"{out_dir}/signif_lrt_foldchange1.tsv"
-vst_file        = f"{out_dir}/vst_normalized_counts.tsv"
-cluster_file    = f"{out_dir}/cluster_assignments.tsv"
-cluster_prof    = f"{out_dir}/cluster_mean_profiles.tsv"
-velocity_file   = f"{out_dir}/velocity_summary.tsv"
-venn_file       = f"{out_dir}/venn_genelists.tsv"
-persist_file    = f"{out_dir}/persistence_classes.tsv"
-gene_act_file   = f"{out_dir}/gene_activity.tsv"
+# --- Paths ---
+out_dir     = f"../results/{run_id}"
+tables_dir  = f"{out_dir}/tables"
+qc_dir      = f"{out_dir}/qc"
+deg_dir     = f"{out_dir}/deg"
+temporal_dir = f"{out_dir}/temporal"
+cross_dir   = f"{out_dir}/cross"
+tf_dir      = f"{out_dir}/tf"
+pathway_dir = f"{out_dir}/pathway"
 
-pathway_dir     = f"{out_dir}/pathway"
-gsea_kegg_file  = f"{pathway_dir}/gsea_kegg_signif.tsv"
-gsea_go_file    = f"{pathway_dir}/gsea_go_signif.tsv"
-gsva_file       = f"{pathway_dir}/gsva_scores.tsv"
-gsva_diff_file  = f"{pathway_dir}/gsva_diff_results.tsv"
-gsea_dotplot    = f"{pathway_dir}/gsea_dotplot_kegg.pdf"
-gsva_dotplot    = f"{pathway_dir}/gsva_diff_dotplot.pdf"
-report_file     = f"{pathway_dir}/interactive_report.html"
+# Core tables
+counts_file    = f"{tables_dir}/counts_matrix.tsv"
+metadata_file  = f"{tables_dir}/metadata.tsv"
+annot_file     = f"{tables_dir}/gene_annotations.tsv"
+combined_file  = f"{tables_dir}/combined_results.tsv"
+signif_file    = f"{tables_dir}/signif_lrt.tsv"
+signif_fc_file = f"{tables_dir}/signif_lrt_foldchange1.tsv"
+vst_file       = f"{tables_dir}/vst_normalized_counts.tsv"
 
-# ─── Default target ───
+# Temporal analysis
+cluster_file   = f"{temporal_dir}/cluster_assignments.tsv"
+cluster_prof   = f"{temporal_dir}/cluster_mean_profiles.tsv"
+velocity_file  = f"{temporal_dir}/velocity_summary.tsv"
+venn_file      = f"{temporal_dir}/venn_genelists.tsv"
+persist_file   = f"{temporal_dir}/persistence_classes.tsv"
+gene_act_file  = f"{temporal_dir}/gene_activity.tsv"
+
+# Cross-cell-line
+cross_shared_file   = f"{cross_dir}/cross_cellline_shared.tsv"
+cross_specific_file = f"{cross_dir}/cross_cellline_specific.tsv"
+cross_persist_file  = f"{cross_dir}/cross_persistence.tsv"
+
+# TF enrichment
+tf_results_file  = f"{tf_dir}/tf_enrichment_results.tsv"
+tf_heatmap_pdf   = f"{tf_dir}/tf_enrichment_heatmap.pdf"
+tf_heatmap_png   = f"{tf_dir}/tf_enrichment_heatmap.png"
+
+# Pathway
+gsea_kegg_file = f"{pathway_dir}/gsea_kegg_signif.tsv"
+gsea_go_file   = f"{pathway_dir}/gsea_go_signif.tsv"
+gsva_file      = f"{pathway_dir}/gsva_scores.tsv"
+gsva_diff_file = f"{pathway_dir}/gsva_diff_results.tsv"
+gsea_dotplot   = f"{pathway_dir}/gsea_dotplot_kegg.pdf"
+gsva_dotplot   = f"{pathway_dir}/gsva_diff_dotplot.pdf"
+report_file    = f"{pathway_dir}/interactive_report.html"
+
+# --- Default target ---
 rule all:
     input:
         report_file
 
 
-# ─── Step 1: Extract count matrix, metadata, gene annotations ───
+# --- Step 1: Extract count matrix, metadata, gene annotations ---
 rule extract_counts:
     input:
         tsv = input_tsv_path
     output:
-        counts  = counts_file,
-        meta    = metadata_file,
-        annot   = annot_file
+        counts = counts_file,
+        meta   = metadata_file,
+        annot  = annot_file
     params:
         count_filter = count_filter_val,
-        design = design_json
+        design       = design_json
     conda:
         "envs/rnaseq.yaml"
     shell:
-        "python scripts/01_extract_counts.py {input.tsv} --out-dir {out_dir} --count-filter {params.count_filter} --design {design_path}"
+        "python scripts/01_extract_counts.py {input.tsv} --out-dir {tables_dir} "
+        "--count-filter {params.count_filter} --design {design_path}"
 
 
-# ─── Step 2: DESeq2 analysis (LRT + pairwise contrasts) ───
+# --- Step 2: DESeq2 analysis (LRT + pairwise contrasts) ---
 rule deseq2_analysis:
     input:
-        counts  = counts_file,
-        meta    = metadata_file,
-        annot   = annot_file
+        counts = counts_file,
+        meta   = metadata_file,
+        annot  = annot_file
     output:
-        combined   = combined_file,
-        signif     = signif_file,
-        signif_fc  = signif_fc_file,
-        vst        = vst_file,
-        cluster    = cluster_file,
-        cluster_p  = cluster_prof,
-        velocity   = velocity_file,
-        venn       = venn_file,
-        persist    = persist_file,
-        gene_act   = gene_act_file
+        combined      = combined_file,
+        signif        = signif_file,
+        signif_fc     = signif_fc_file,
+        vst           = vst_file,
+        cluster       = cluster_file,
+        cluster_p     = cluster_prof,
+        velocity      = velocity_file,
+        venn          = venn_file,
+        persist       = persist_file,
+        gene_act      = gene_act_file,
+        cross_shared  = cross_shared_file,
+        cross_specific = cross_specific_file,
+        cross_persist = cross_persist_file
     params:
         pvalue = pvalue_val,
         design = design_json,
@@ -121,40 +153,62 @@ rule deseq2_analysis:
     conda:
         "envs/rnaseq.yaml"
     shell:
-        "Rscript scripts/02_deseq2_analysis.R {out_dir} {design_path} {pvalue_val} {temporal_n_clus} {temporal_fc_thr}"
+        "Rscript scripts/02_deseq2_analysis.R {out_dir} {design_path} {pvalue_val} "
+        "{temporal_n_clus} {temporal_fc_thr}"
 
 
-# ─── Step 3: Pathway analysis (GSEA + Pathview + GSVA) ───
+# --- Step 3: Pathway analysis (GSEA + Pathview + GSVA) ---
 rule pathway_analysis:
     input:
         combined = combined_file
     output:
-        gsea_kegg   = gsea_kegg_file,
-        gsea_go     = gsea_go_file,
-        gsva        = gsva_file,
-        gsva_diff   = gsva_diff_file,
-        gsea_dp     = gsea_dotplot,
-        gsva_dp     = gsva_dotplot
+        gsea_kegg = gsea_kegg_file,
+        gsea_go   = gsea_go_file,
+        gsva      = gsva_file,
+        gsva_diff = gsva_diff_file,
+        gsea_dp   = gsea_dotplot,
+        gsva_dp   = gsva_dotplot
     params:
         design = design_json
     conda:
         "envs/rnaseq.yaml"
     shell:
-        "Rscript scripts/03_pathway_analysis.R {out_dir} {pathway_dir} {gsea_min_val} {gsea_max_val} {design_path}"
+        "Rscript scripts/03_pathway_analysis.R {out_dir} {pathway_dir} {gsea_min_val} "
+        "{gsea_max_val} {design_path}"
 
 
-# ─── Step 4: Interactive HTML report ───
+# --- Step 3b: TF target enrichment (enrichR) ---
+rule tf_enrichment:
+    input:
+        cross_shared = cross_shared_file,
+        persist      = persist_file,
+        annot        = annot_file
+    output:
+        results  = tf_results_file,
+        heat_pdf = tf_heatmap_pdf,
+        heat_png = tf_heatmap_png
+    params:
+        databases = enrichr_dbs_str
+    conda:
+        "envs/rnaseq.yaml"
+    shell:
+        "Rscript scripts/03b_tf_enrichment.R {out_dir} {params.databases}"
+
+
+# --- Step 4: Interactive HTML report ---
 rule interactive_report:
     input:
-        combined   = combined_file,
-        gsea_kegg  = gsea_kegg_file,
-        gsea_go    = gsea_go_file,
-        cluster    = cluster_file,
-        cluster_p  = cluster_prof,
-        velocity   = velocity_file,
-        venn       = venn_file,
-        persist    = persist_file,
-        gene_act   = gene_act_file
+        combined      = combined_file,
+        gsea_kegg     = gsea_kegg_file,
+        gsea_go       = gsea_go_file,
+        cluster       = cluster_file,
+        cluster_p     = cluster_prof,
+        velocity      = velocity_file,
+        venn          = venn_file,
+        persist       = persist_file,
+        gene_act      = gene_act_file,
+        cross_shared  = cross_shared_file,
+        tf_results    = tf_results_file
     output:
         report = report_file
     params:
@@ -163,3 +217,15 @@ rule interactive_report:
         "envs/rnaseq.yaml"
     shell:
         "Rscript scripts/04_interactive_report.R {out_dir} {pathway_dir} {design_path}"
+
+
+# --- Cleanup: remove Windows Zone.Identifier artifacts ---
+rule clean_artifacts:
+    input:
+        report_file
+    output:
+        touch(f"{out_dir}/.cleaned")
+    shell:
+        "find {out_dir} -name '*Zone.Identifier' -delete 2>/dev/null; "
+        "find {out_dir} -name '.~lock*' -delete 2>/dev/null; "
+        "touch {out_dir}/.cleaned"
