@@ -193,6 +193,75 @@ write.table(results_df, file = file.path(out_dir, "tf", "tf_enrichment_results.t
             sep = "\t", row.names = FALSE, quote = FALSE)
 cat(sprintf("Wrote tf_enrichment_results.tsv (%d rows)\n", nrow(results_df)))
 
+# --- 7b. TF Activity Inference: cross-reference TFs with their own expression ---
+cat("\n=== TF Activity Inference ===\n")
+
+combined_expr <- read.table(file.path(out_dir, "tables", "combined_results.tsv"),
+                            header = TRUE, sep = "\t", stringsAsFactors = FALSE,
+                            quote = "", fill = TRUE, comment.char = "")
+
+# Dynamically discover all {cell_line}_{timepoint}_vs_mock comparisons
+lfc_cols  <- grep("_vs_mock_log2FC$", colnames(combined_expr), value = TRUE)
+padj_cols <- grep("_vs_mock_padj$",  colnames(combined_expr), value = TRUE)
+cat(sprintf("Found %d comparisons in combined_results\n", length(lfc_cols)))
+
+# Clean TF name → gene symbol (first word before any space/suffix)
+all_tf_names <- unique(results_df$TF)
+tf_gene_symbols <- sub(" .*", "", all_tf_names)
+
+# Build TF name → cleaned symbol lookup
+tf2sym <- setNames(tf_gene_symbols, all_tf_names)
+
+# For each unique TF, look up its expression in combined_results
+tf_expr_info <- data.frame(
+  TF = all_tf_names,
+  gene_symbol = tf_gene_symbols,
+  TF_is_DEG  = FALSE,
+  TF_best_log2FC  = NA_real_,
+  TF_best_padj    = NA_real_,
+  TF_best_comparison = "",
+  TF_n_sig  = 0L,
+  stringsAsFactors = FALSE
+)
+
+n_tf_found <- 0
+for (i in seq_len(nrow(tf_expr_info))) {
+  sym <- tf_expr_info$gene_symbol[i]
+  row <- combined_expr[combined_expr$gene_symbol == sym, ]
+  if (nrow(row) == 0) next
+
+  n_tf_found <- n_tf_found + 1
+
+  # Extract all padj values for _vs_mock comparisons
+  padj_vals <- as.numeric(unlist(row[1, padj_cols]))
+  lfc_vals  <- as.numeric(unlist(row[1, lfc_cols]))
+
+  if (all(is.na(padj_vals))) next
+
+  best_idx <- which.min(padj_vals)
+  if (length(best_idx) == 0 || is.na(padj_vals[best_idx])) next
+
+  tf_expr_info$TF_is_DEG[i]       <- any(padj_vals < 0.05, na.rm = TRUE)
+  tf_expr_info$TF_best_log2FC[i]  <- lfc_vals[best_idx]
+  tf_expr_info$TF_best_padj[i]    <- padj_vals[best_idx]
+  tf_expr_info$TF_best_comparison[i] <- sub("_padj$", "", padj_cols[best_idx])
+  tf_expr_info$TF_n_sig[i]        <- sum(padj_vals < 0.05, na.rm = TRUE)
+}
+
+cat(sprintf("TF expression found for: %d / %d unique TFs (%d are DEGs in >=1 comparison)\n",
+            n_tf_found, length(all_tf_names), sum(tf_expr_info$TF_is_DEG)))
+
+# Join expression info back to enrichment results
+results_df <- merge(results_df,
+                    tf_expr_info[, c("TF", "TF_is_DEG", "TF_best_log2FC",
+                                      "TF_best_padj", "TF_best_comparison", "TF_n_sig")],
+                    by = "TF", all.x = TRUE)
+
+# Re-write TSV with TF expression columns
+write.table(results_df, file = file.path(out_dir, "tf", "tf_enrichment_results.tsv"),
+            sep = "\t", row.names = FALSE, quote = FALSE)
+cat(sprintf("Re-wrote tf_enrichment_results.tsv with TF activity columns (%d rows)\n", nrow(results_df)))
+
 # --- 8. Enrichment Heatmap: all significant TFs × all gene sets ---
 suppressPackageStartupMessages({
   library("pheatmap")
@@ -268,12 +337,23 @@ if (nrow(sig_tfs) > 0) {
     "TRANSFAC_and_JASPAR_PWMs" = "TRANSFAC/JASPAR",
     "ARCHS4_TFs_Coexp" = "ARCHS4"
   )
+  # Row annotation: TF_is_DEG (is the TF itself differentially expressed?)
+  tf_is_deg_vec <- sapply(tf_clean_names, function(nm) {
+    orig_tf <- tf_levels[match(nm, tf_clean_names)]
+    if (is.na(orig_tf)) return(FALSE)
+    idx <- match(orig_tf, tf_expr_info$TF)
+    if (is.na(idx)) return(FALSE)
+    tf_expr_info$TF_is_DEG[idx]
+  })
+
   ann_row <- data.frame(
     Library = short_lib[tf_lib_vec],
+    TF_DEG   = ifelse(tf_is_deg_vec, "DEG", "Not_DEG"),
     row.names = tf_clean_names
   )
   lib_colors <- setNames(c("#E41A1C", "#377EB8", "#4DAF4A", "#FF7F00"),
                          c("ChEA", "ENCODE+ChEA", "TRANSFAC/JASPAR", "ARCHS4"))
+  deg_colors <- setNames(c("#FF7F00", "grey80"), c("DEG", "Not_DEG"))
 
   # Column annotation: gene set type
   gs_type <- sapply(colnames(heat_mat), function(gs) {
@@ -287,6 +367,7 @@ if (nrow(sig_tfs) > 0) {
 
   ann_colors_full <- list(
     Library = lib_colors[intersect(names(lib_colors), unique(ann_row$Library))],
+    TF_DEG  = deg_colors[intersect(names(deg_colors), unique(ann_row$TF_DEG))],
     Type    = type_colors[intersect(names(type_colors), unique(ann_col$Type))]
   )
 
@@ -313,13 +394,13 @@ if (nrow(sig_tfs) > 0) {
            fontsize_number   = 8,
            color             = heat_colors,
            breaks            = breaks,
-           main              = "TF Target Enrichment (enrichR)",
+           main              = "TF Target Enrichment\nColor = -log10(adj.p), Numbers = overlap count",
            fontsize          = 10,
            fontsize_row      = 9,
            fontsize_col      = 10,
            border_color      = "grey80",
            legend_breaks     = seq(0, ceiling(max_val), by = 1),
-           legend_labels     = as.character(round(seq(0, ceiling(max_val), by = 1), 1)))
+           name              = "-log10(adj.p)")
   dev.off()
 
   png(file.path(out_dir, "tf", "tf_enrichment_heatmap.png"),
@@ -336,13 +417,37 @@ if (nrow(sig_tfs) > 0) {
            fontsize_number   = 8,
            color             = heat_colors,
            breaks            = breaks,
-           main              = "TF Target Enrichment (enrichR)",
+           main              = "TF Target Enrichment\nColor = -log10(adj.p), Numbers = overlap count",
            fontsize          = 10,
            fontsize_row      = 9,
            fontsize_col      = 10,
            border_color      = "grey80",
            legend_breaks     = seq(0, ceiling(max_val), by = 1),
-           legend_labels     = as.character(round(seq(0, ceiling(max_val), by = 1), 1)))
+           name              = "-log10(adj.p)")
+  dev.off()
+
+  png(file.path(out_dir, "tf", "tf_enrichment_heatmap.png"),
+      width = plot_w, height = plot_h, units = "in", res = 150)
+  pheatmap(heat_mat,
+           annotation_row    = ann_row,
+           annotation_col    = ann_col,
+           annotation_colors = ann_colors_full,
+           cluster_rows      = (nrow(heat_mat) > 2),
+           cluster_cols      = (ncol(heat_mat) > 2),
+           display_numbers   = overlap_mat,
+           number_format     = "%s",
+           number_color      = "black",
+           fontsize_number   = 8,
+           color             = heat_colors,
+           breaks            = breaks,
+           main              = "TF Target Enrichment\nColor = -log10(adj.p), Numbers = overlap count",
+           fontsize          = 10,
+           fontsize_row      = 9,
+           fontsize_col      = 10,
+           border_color      = "grey80",
+           legend_breaks     = seq(0, ceiling(max_val), by = 1),
+           legend_labels     = seq(0, ceiling(max_val), by = 1),
+           name              = "-log10(adj.p)")
   dev.off()
   cat(sprintf("Saved tf_enrichment_heatmap.pdf / .png\n"))
 } else {
@@ -375,6 +480,33 @@ for (gs in unique(best_per_set$gene_set)) {
     cat(sprintf("    %-30s  (%-45s) n=%d, p=%.1e%s\n",
                 r$TF, r$library, r$n_overlap, r$adj_pvalue, score_str))
   }
+}
+
+# --- 9b. Active TF candidates: enriched AND differentially expressed ---
+cat("\n=== Active TF Candidates (enriched + differentially expressed) ===\n")
+
+active_tfs <- results_df[results_df$TF_is_DEG & results_df$adj_pvalue < 0.05, ]
+if (nrow(active_tfs) > 0) {
+  active_summary <- active_tfs %>%
+    group_by(TF) %>%
+    summarise(
+      gene_sets    = paste(unique(gene_set), collapse = ", "),
+      best_pvalue  = min(adj_pvalue),
+      tf_log2FC    = first(na.omit(TF_best_log2FC)),
+      tf_comparison = first(na.omit(TF_best_comparison)),
+      tf_direction = if (!is.na(first(na.omit(TF_best_log2FC))) && first(na.omit(TF_best_log2FC)) > 0) "Up" else "Down",
+      .groups = "drop"
+    ) %>%
+    arrange(best_pvalue)
+
+  for (i in seq_len(nrow(active_summary))) {
+    r <- active_summary[i, ]
+    cat(sprintf("  %-12s enriched in %-30s | TF %s in %s (log2FC=%.2f, p=%.1e)\n",
+                r$TF, r$gene_sets, r$tf_direction, r$tf_comparison,
+                r$tf_log2FC, r$best_pvalue))
+  }
+} else {
+  cat("  No TFs are both enriched AND differentially expressed.\n")
 }
 
 cat("\n=== TF Enrichment Complete ===\n")

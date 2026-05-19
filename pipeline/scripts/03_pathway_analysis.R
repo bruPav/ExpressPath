@@ -286,7 +286,7 @@ if (exists("gsea_kegg_sig") && nrow(gsea_kegg_sig) > 0) {
 cat("\n=== Part 3: GSVA ===\n")
 
 # Load metadata
-metadata <- read.delim(file.path(results_dir, "metadata.tsv"),
+metadata <- read.delim(file.path(results_dir, "tables", "metadata.tsv"),
                        stringsAsFactors = FALSE)
 rownames(metadata) <- metadata$sample_id
 metadata$cell_line <- factor(metadata$cell_line)
@@ -295,7 +295,7 @@ metadata$group <- factor(paste(metadata$cell_line, metadata$time, sep = "_"))
 
 # Load VST counts
 cat("Loading VST counts...\n")
-vst_counts <- as.matrix(read.table(file.path(results_dir, "vst_normalized_counts.tsv"),
+vst_counts <- as.matrix(read.table(file.path(results_dir, "tables", "vst_normalized_counts.tsv"),
                                     header = TRUE, row.names = 1, sep = "\t",
                                     check.names = FALSE))
 
