@@ -7,6 +7,13 @@
 # Usage: Rscript 03b_tf_enrichment.R <results_dir>
 #
 
+# Self-healing: install CRAN-only packages if missing
+for (pkg in c("enrichR", "visNetwork")) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    install.packages(pkg, repos = "https://cloud.r-project.org", quiet = TRUE)
+  }
+}
+
 suppressPackageStartupMessages({
   library("enrichR")
   library("ggplot2")
@@ -729,7 +736,13 @@ if (nrow(sig_net) > 0 && n_sig_tfs >= 1) {
               shape = "triangle") %>%
     visOptions(highlightNearest = list(enabled = TRUE, degree = 1, hover = TRUE),
                nodesIdSelection = TRUE) %>%
-    visPhysics(solver = "forceAtlas2Based", stabilization = list(iterations = 200)) %>%
+    visEdges(arrows = "to", smooth = FALSE,
+             scaling = list(min = 1, max = 5)) %>%
+    visPhysics(solver = "barnesHut",
+               barnesHut = list(gravitationalConstant = -3000, centralGravity = 0.3,
+                                springLength = 150, springConstant = 0.04),
+               stabilization = list(iterations = 300, fit = TRUE)) %>%
+    visInteraction(navigationButtons = TRUE, dragNodes = TRUE) %>%
     visLayout(randomSeed = 42) %>%
     visLegend(width = 0.2, position = "right",
               main = "Node types",

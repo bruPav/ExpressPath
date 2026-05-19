@@ -22,6 +22,11 @@ dependencies:
   - bioconductor-mfuzz
   - r-complexupset
   - r-venndiagram
+  # TF enrichment + network
+  - r-igraph
+  - r-ggraph
+  - r-tidygraph
+  - r-ggforce
   # Report
   - r-htmltools
   - r-base64enc
