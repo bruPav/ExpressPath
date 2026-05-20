@@ -461,7 +461,7 @@ if (nrow(sig_tfs) > 0) {
 }
 
 # --- 8b. TF-Gene Regulatory Network ---
-cat("\n=== TF-Gene Regulatory Network ===\n")
+cat("\n=== TF-Gene Regulatory Networks ===\n")
 
 sig_net <- results_df[results_df$adj_pvalue < 0.05, ]
 n_sig_tfs <- length(unique(sig_net$TF))
@@ -474,289 +474,249 @@ if (nrow(sig_net) > 0 && n_sig_tfs >= 1) {
     library("visNetwork")
   })
 
-  # Build edge list: TF → gene_symbol from enrichment genes column
-  edge_list <- list()
-  for (i in seq_len(nrow(sig_net))) {
-    tf_name <- sig_net$TF[i]
-    gene_str <- sig_net$genes[i]
-    if (is.na(gene_str) || gene_str == "") next
-    gene_syms <- strsplit(gene_str, ";")[[1]]
-    gene_syms <- trimws(gene_syms)
-    gene_syms <- gene_syms[gene_syms != ""]
-    for (gs in gene_syms) {
-      edge_list[[length(edge_list) + 1]] <- data.frame(
-        from = tf_name,
-        to = gs,
-        gene_set = sig_net$gene_set[i],
-        combined_score = sig_net$combined_score[i],
-        adj_pvalue = sig_net$adj_pvalue[i],
-        stringsAsFactors = FALSE
-      )
-    }
-  }
-  edges_df <- do.call(rbind, edge_list)
-  cat(sprintf("Edges: %d TF→gene relationships\n", nrow(edges_df)))
+  # Extract cell lines from gene_set prefixes (dynamic, any number)
+  all_gs <- unique(sig_net$gene_set)
+  cell_lines <- setdiff(unique(sub("_.*", "", all_gs)), c("Shared", "Cross"))
+  cat(sprintf("Cell lines in enrichment: %s\n", paste(cell_lines, collapse = ", ")))
 
-  # Build node list: all unique TFs and target genes
-  tf_nodes <- unique(sig_net$TF)
-  gene_nodes <- setdiff(unique(edges_df$to), tf_nodes)
+  # Define networks: one per cell line + Shared/Cross
+  network_prefixes <- c(setNames(paste0("^", cell_lines, "_"), cell_lines),
+                        Shared = "^Shared_|^Cross_")
 
-  # TF node attributes
-  tf_df <- data.frame(
-    name = tf_nodes,
-    type = "TF",
-    stringsAsFactors = FALSE
-  )
-  # Best library and significance per TF
-  tf_best <- sig_net %>%
-    group_by(TF) %>%
-    summarise(
-      best_library = first(library),
-      best_adjp    = min(adj_pvalue),
-      best_score   = max(combined_score, na.rm = TRUE),
-      .groups = "drop"
-    )
-  tf_df$library <- tf_best$best_library[match(tf_df$name, tf_best$TF)]
-  tf_df$adj_pvalue <- tf_best$best_adjp[match(tf_df$name, tf_best$TF)]
-  tf_df$combined_score <- tf_best$best_score[match(tf_df$name, tf_best$TF)]
-  tf_df$node_size <- -log10(tf_df$adj_pvalue)
-  tf_df$node_size[!is.finite(tf_df$node_size)] <- 3
-
-  # Look up TF expression
-  tf_df$is_DEG <- tf_expr_info$TF_is_DEG[match(tf_df$name, tf_expr_info$TF)]
-  tf_df$is_DEG[is.na(tf_df$is_DEG)] <- FALSE
-
-  # Gene node attributes: look up expression in combined_results
-  gene_df <- data.frame(
-    name = gene_nodes,
-    type = "Gene",
-    stringsAsFactors = FALSE
-  )
-
-  # For each gene, find its best direction and persistence
-  gene_df$direction <- "Mixed"
-  gene_df$is_DEG    <- FALSE
-  gene_df$log2FC     <- NA_real_
-  gene_df$persistence <- ""
-
-  for (i in seq_len(nrow(gene_df))) {
-    sym <- gene_df$name[i]
-    row <- combined_expr[combined_expr$gene_symbol == sym, ]
-    if (nrow(row) == 0) next
-
-    # Best comparison by padj
-    padj_vals <- as.numeric(unlist(row[1, padj_cols]))
-    lfc_vals  <- as.numeric(unlist(row[1, lfc_cols]))
-    if (all(is.na(padj_vals))) next
-
-    best_idx <- which.min(padj_vals)
-    if (length(best_idx) == 0 || is.na(padj_vals[best_idx])) next
-
-    gene_df$log2FC[i]  <- lfc_vals[best_idx]
-    gene_df$is_DEG[i]  <- padj_vals[best_idx] < 0.05
-
-    if (lfc_vals[best_idx] > 0) {
-      gene_df$direction[i] <- "Up"
-    } else if (lfc_vals[best_idx] < 0) {
-      gene_df$direction[i] <- "Down"
-    }
-  }
-
-  # Persistence from persist_df
+  # Helper: build persistence shapes lookup
+  gene_sym_to_persist <- list()
   if (exists("persist_df") && nrow(persist_df) > 0) {
-    gene_ids <- annot$gene_id[match(gene_df$name, annot$gene_symbol)]
-    names(gene_ids) <- gene_df$name
-    for (i in seq_len(nrow(gene_df))) {
-      gid <- gene_ids[i]
-      if (!is.na(gid)) {
-        cats <- unique(persist_df$category[persist_df$gene_id == gid])
-        if (length(cats) == 1) gene_df$persistence[i] <- cats[1]
-        else if (length(cats) > 1) gene_df$persistence[i] <- paste(cats, collapse = "/")
-      }
+    sym_to_id <- setNames(annot$gene_id, annot$gene_symbol)
+    for (gene_sym in names(sym_to_id)) {
+      gid <- sym_to_id[gene_sym]
+      if (is.na(gid)) next
+      cats <- unique(persist_df$category[persist_df$gene_id == gid])
+      if (length(cats) == 1) gene_sym_to_persist[[gene_sym]] <- cats[1]
+      else if (length(cats) > 1) gene_sym_to_persist[[gene_sym]] <- paste(cats, collapse = "/")
     }
   }
-  gene_df$persistence[gene_df$persistence == ""] <- "Unknown"
-
-  # Node degree (hub score)
-  gene_degree <- table(edges_df$to)
-  gene_df$degree <- as.integer(gene_degree[gene_df$name])
-  gene_df$degree[is.na(gene_df$degree)] <- 0
-
-  tf_degree <- table(edges_df$from)
-  tf_df$degree <- as.integer(tf_degree[tf_df$name])
-  tf_df$degree[is.na(tf_df$degree)] <- 0
-
-  # Combine nodes
-  tf_df$direction   <- NA_character_
-  tf_df$log2FC      <- NA_real_
-  tf_df$persistence <- ""
-  gene_df$library <- NA_character_
-  gene_df$node_size <- 3
-  gene_df$adj_pvalue <- NA_real_
-  gene_df$combined_score <- NA_real_
-
-  all_nodes <- rbind(
-    tf_df[, c("name", "type", "library", "direction", "is_DEG", "log2FC",
-              "persistence", "node_size", "adj_pvalue", "combined_score", "degree")],
-    gene_df[, c("name", "type", "library", "direction", "is_DEG", "log2FC",
-                "persistence", "node_size", "adj_pvalue", "combined_score", "degree")]
-  )
-
-  # Build igraph
-  g <- graph_from_data_frame(edges_df[, c("from", "to", "gene_set", "combined_score")],
-                             vertices = all_nodes, directed = TRUE)
-
-  # Community detection
-  comm <- cluster_louvain(as.undirected(g))
-  V(g)$community <- comm$membership
-  n_comm <- length(unique(comm$membership))
-  cat(sprintf("Nodes: %d (TFs=%d, genes=%d) in %d communities\n",
-              vcount(g), sum(V(g)$type == "TF"), sum(V(g)$type == "Gene"), n_comm))
-
-  # Community summary
-  for (cid in sort(unique(comm$membership))) {
-    members <- V(g)$name[V(g)$community == cid]
-    tfs_in_c   <- intersect(members, tf_nodes)
-    genes_in_c <- intersect(members, gene_nodes)
-    cat(sprintf("  Community %d: TFs=[%s] + %d genes\n",
-                cid, paste(tfs_in_c, collapse = ", "), length(genes_in_c)))
-  }
-
-  # --- Static network plot (ggraph) ---
-  g_tidy <- as_tbl_graph(g)
 
   direction_colors <- c("Up" = "#E41A1C", "Down" = "#377EB8",
                         "Mixed" = "grey70", "Unknown" = "grey70")
-  lib_colors_net <- c("ChEA_2016" = "#E41A1C",
-                      "ENCODE_and_ChEA_Consensus_TFs_from_ChIP-X" = "#377EB8",
-                      "TRANSFAC_and_JASPAR_PWMs" = "#4DAF4A",
-                      "ARCHS4_TFs_Coexp" = "#FF7F00")
-
+  # TF fill color
+  tf_fill <- "#FF7F00"
   short_lib_net <- c("ChEA_2016" = "ChEA",
                      "ENCODE_and_ChEA_Consensus_TFs_from_ChIP-X" = "ENCODE+ChEA",
                      "TRANSFAC_and_JASPAR_PWMs" = "JASPAR",
                      "ARCHS4_TFs_Coexp" = "ARCHS4")
 
-  V(g_tidy)$library_short <- short_lib_net[V(g_tidy)$library]
+  for (net_name in names(network_prefixes)) {
+    cat(sprintf("\n--- %s Regulatory Network ---\n", net_name))
 
-  set.seed(42)
-  p_net <- ggraph(g_tidy, layout = "fr") +
-    # Edges
-    geom_edge_link(
-      aes(width = combined_score, alpha = combined_score),
-      color = "grey60"
-    ) +
-    scale_edge_width(range = c(0.15, 1.2), guide = "none") +
-    scale_edge_alpha(range = c(0.15, 0.6), guide = "none") +
-    # Gene nodes
-    geom_node_point(
-      data = function(x) x[x$type == "Gene", ],
-      aes(fill = direction, shape = persistence, size = degree + 1,
-          stroke = ifelse(is_DEG, 1.2, 0.3)),
-      color = "grey40"
-    ) +
-    # TF nodes
-    geom_node_point(
-      data = function(x) x[x$type == "TF", ],
-      aes(fill = library_short, size = node_size, stroke = ifelse(is_DEG, 1.5, 0.3)),
-      shape = 21, color = "black"
-    ) +
-    # Labels
-    geom_node_text(
-      aes(label = name, filter = (type == "TF" | degree >= 3)),
-      size = 2.5, repel = TRUE, max.overlaps = 50,
-      box.padding = 0.3, point.padding = 0.2, segment.color = "grey70"
-    ) +
-    scale_fill_manual(
-      values = c(direction_colors, lib_colors_net),
-      breaks = c("Up", "Down", "ChEA", "ENCODE+ChEA", "JASPAR", "ARCHS4"),
-      na.value = "grey50",
-      guide = guide_legend(title = "Direction / Library", override.aes = list(size = 4))
-    ) +
-    scale_shape_manual(
-      values = c("Transient" = 21, "Sustained" = 24, "Secondary_Deferred" = 22,
-                 "Unknown" = 1),
-      guide = guide_legend(title = "Persistence", override.aes = list(fill = "grey50"))
-    ) +
-    scale_size_continuous(range = c(1, 8), guide = "none") +
-    labs(
-      title = "TF → Target Gene Regulatory Network",
-      subtitle = paste0(n_sig_tfs, " enriched TFs, ", length(gene_nodes),
-                       " target genes, ", nrow(edges_df), " edges, ", n_comm, " modules"),
-      caption = "Gene: red=up, blue=down · Shape: persistence · TF: library color · Community: see console"
-    ) +
-    theme_graph(base_family = "sans") +
-    theme(legend.position = "bottom")
+    # Filter enrichments for this network
+    net_edges_raw <- sig_net[grepl(network_prefixes[net_name], sig_net$gene_set), ]
+    if (nrow(net_edges_raw) == 0) {
+      cat("  No significant enrichments for this network; skipping.\n")
+      next
+    }
 
-  ggsave(file.path(out_dir, "tf", "tf_regulatory_network.pdf"), p_net,
-         width = 14, height = 12)
-  ggsave(file.path(out_dir, "tf", "tf_regulatory_network.png"), p_net,
-         width = 14, height = 12, dpi = 150)
-  cat("Saved tf_regulatory_network.pdf / .png\n")
+    # Build edge list
+    edge_list <- list()
+    for (i in seq_len(nrow(net_edges_raw))) {
+      tf_name <- net_edges_raw$TF[i]
+      gene_str <- net_edges_raw$genes[i]
+      if (is.na(gene_str) || gene_str == "") next
+      gene_syms <- trimws(strsplit(gene_str, ";")[[1]])
+      gene_syms <- gene_syms[gene_syms != ""]
+      for (gs in gene_syms) {
+        edge_list[[length(edge_list) + 1]] <- data.frame(
+          from = tf_name, to = gs,
+          gene_set = net_edges_raw$gene_set[i],
+          combined_score = net_edges_raw$combined_score[i],
+          adj_pvalue = net_edges_raw$adj_pvalue[i],
+          stringsAsFactors = FALSE
+        )
+      }
+    }
+    edges_df <- do.call(rbind, edge_list)
+    cat(sprintf("  Edges: %d TF→gene\n", nrow(edges_df)))
 
-  # --- Interactive network (visNetwork) ---
-  vis_nodes <- data.frame(
-    id = V(g)$name,
-    label = V(g)$name,
-    group = ifelse(V(g)$type == "TF", "TF", V(g)$direction),
-    title = ifelse(V(g)$type == "TF",
-      paste0(V(g)$name, "\n",
-             "Library: ", short_lib_net[V(g)$library],
-             "\np-value: ", formatC(V(g)$adj_pvalue, format = "e", digits = 2),
-             "\nTargets: ", V(g)$degree),
-      paste0(V(g)$name, "\n",
-             "Direction: ", V(g)$direction,
-             ifelse(!is.na(V(g)$log2FC), paste0("\nlog2FC: ", round(V(g)$log2FC, 3)), ""),
-             "\nPersistence: ", V(g)$persistence,
-             ifelse(V(g)$is_DEG, "\n[IS DEG]", ""),
-             "\nDegree: ", V(g)$degree)
-    ),
-    shape = ifelse(V(g)$type == "TF", "dot", "triangle"),
-    size = ifelse(V(g)$type == "TF", V(g)$node_size * 3, (V(g)$degree + 1) * 3),
-    stringsAsFactors = FALSE
-  )
+    # Node lists
+    tf_nodes   <- unique(net_edges_raw$TF)
+    gene_nodes <- setdiff(unique(edges_df$to), tf_nodes)
 
-  vis_edges <- data.frame(
-    from = edges_df$from,
-    to   = edges_df$to,
-    title = paste0("Score: ", round(edges_df$combined_score, 1),
-                   "\nGene set: ", edges_df$gene_set),
-    value = pmin(edges_df$combined_score / 10, 5),
-    stringsAsFactors = FALSE
-  )
+    # TF attributes
+    tf_best <- net_edges_raw %>%
+      group_by(TF) %>%
+      summarise(best_library = first(library), best_adjp = min(adj_pvalue),
+                best_score = max(combined_score, na.rm = TRUE), .groups = "drop")
+    tf_df <- data.frame(name = tf_nodes, type = "TF", stringsAsFactors = FALSE)
+    tf_df$library <- tf_best$best_library[match(tf_df$name, tf_best$TF)]
+    tf_df$adj_pvalue <- tf_best$best_adjp[match(tf_df$name, tf_best$TF)]
+    tf_df$combined_score <- tf_best$best_score[match(tf_df$name, tf_best$TF)]
+    tf_df$node_size <- -log10(tf_df$adj_pvalue)
+    tf_df$node_size[!is.finite(tf_df$node_size)] <- 3
+    tf_df$is_DEG <- tf_expr_info$TF_is_DEG[match(tf_df$name, tf_expr_info$TF)]
+    tf_df$is_DEG[is.na(tf_df$is_DEG)] <- FALSE
 
-  vis_net <- visNetwork(vis_nodes, vis_edges, width = "100%", height = "800px") %>%
-    visGroups(groupname = "TF", color = list(background = "#FF7F00", border = "black"),
-              shape = "dot") %>%
-    visGroups(groupname = "Up", color = list(background = "#E41A1C", border = "grey40"),
-              shape = "triangle") %>%
-    visGroups(groupname = "Down", color = list(background = "#377EB8", border = "grey40"),
-              shape = "triangle") %>%
-    visGroups(groupname = "Mixed", color = list(background = "grey70", border = "grey40"),
-              shape = "triangle") %>%
-    visOptions(highlightNearest = list(enabled = TRUE, degree = 1, hover = TRUE),
-               nodesIdSelection = TRUE) %>%
-    visEdges(arrows = "to", smooth = FALSE,
-             scaling = list(min = 1, max = 5)) %>%
-    visPhysics(solver = "barnesHut",
-               barnesHut = list(gravitationalConstant = -3000, centralGravity = 0.3,
-                                springLength = 150, springConstant = 0.04),
-               stabilization = list(iterations = 300, fit = TRUE)) %>%
-    visInteraction(navigationButtons = TRUE, dragNodes = TRUE) %>%
-    visLayout(randomSeed = 42) %>%
-    visLegend(width = 0.2, position = "right",
-              main = "Node types",
-              useGroups = FALSE,
-              addNodes = list(
-                list(label = "TF (enriched)", shape = "dot", color = "#FF7F00", size = 20),
-                list(label = "Gene up", shape = "triangle", color = "#E41A1C", size = 15),
-                list(label = "Gene down", shape = "triangle", color = "#377EB8", size = 15),
-                list(label = "Mixed/unknown", shape = "triangle", color = "grey70", size = 15)
-              ))
+    # Gene attributes
+    gene_df <- data.frame(name = gene_nodes, type = "Gene", stringsAsFactors = FALSE)
+    gene_df$direction <- "Mixed"
+    gene_df$is_DEG    <- FALSE
+    gene_df$log2FC    <- NA_real_
+    gene_df$persistence <- ""
 
-  visSave(vis_net, file.path(out_dir, "tf", "tf_regulatory_network.html"),
-          selfcontained = TRUE)
-  cat("Saved tf_regulatory_network.html\n")
+    for (i in seq_len(nrow(gene_df))) {
+      sym <- gene_df$name[i]
+      row <- combined_expr[combined_expr$gene_symbol == sym, ]
+      if (nrow(row) == 0) next
+      padj_vals <- as.numeric(unlist(row[1, padj_cols]))
+      lfc_vals  <- as.numeric(unlist(row[1, lfc_cols]))
+      if (all(is.na(padj_vals))) next
+      best_idx <- which.min(padj_vals)
+      if (length(best_idx) == 0 || is.na(padj_vals[best_idx])) next
+      gene_df$log2FC[i] <- lfc_vals[best_idx]
+      gene_df$is_DEG[i] <- padj_vals[best_idx] < 0.05
+      if (lfc_vals[best_idx] > 0) gene_df$direction[i] <- "Up"
+      else if (lfc_vals[best_idx] < 0) gene_df$direction[i] <- "Down"
+      gene_df$persistence[i] <- if (!is.null(gene_sym_to_persist[[sym]]))
+        gene_sym_to_persist[[sym]] else ""
+    }
+    gene_df$persistence[gene_df$persistence == ""] <- "Unknown"
+    gene_df$persistence[grepl("/", gene_df$persistence)] <- "Divergent"
+
+    # Degree
+    gene_deg <- table(edges_df$to); tf_deg <- table(edges_df$from)
+    gene_df$degree <- as.integer(gene_deg[gene_df$name]); gene_df$degree[is.na(gene_df$degree)] <- 0
+    tf_df$degree   <- as.integer(tf_deg[tf_df$name]);   tf_df$degree[is.na(tf_df$degree)] <- 0
+
+    # Combine
+    tf_df$direction <- NA_character_; tf_df$log2FC <- NA_real_; tf_df$persistence <- ""
+    gene_df$library <- NA_character_; gene_df$node_size <- 3
+    gene_df$adj_pvalue <- NA_real_; gene_df$combined_score <- NA_real_
+
+    all_nodes <- rbind(
+      tf_df[, c("name","type","library","direction","is_DEG","log2FC","persistence","node_size","adj_pvalue","combined_score","degree")],
+      gene_df[, c("name","type","library","direction","is_DEG","log2FC","persistence","node_size","adj_pvalue","combined_score","degree")]
+    )
+
+    # Build graph
+    g <- graph_from_data_frame(edges_df[, c("from","to","gene_set","combined_score")],
+                               vertices = all_nodes, directed = TRUE)
+    if (vcount(g) < 2) { cat("  Too few nodes; skipping.\n"); next }
+
+    comm <- cluster_louvain(as_undirected(g))
+    V(g)$community <- comm$membership
+    n_comm <- length(unique(comm$membership))
+    cat(sprintf("  Nodes: %d (TFs=%d, genes=%d) in %d communities\n",
+                vcount(g), sum(V(g)$type == "TF"), sum(V(g)$type == "Gene"), n_comm))
+
+    for (cid in sort(unique(comm$membership))) {
+      members <- V(g)$name[V(g)$community == cid]
+      tfs_in_c   <- intersect(members, tf_nodes)
+      genes_in_c <- intersect(members, gene_nodes)
+      cat(sprintf("    C%d: TFs=[%s] + %d genes\n",
+                  cid, paste(tfs_in_c, collapse=", "), length(genes_in_c)))
+    }
+
+    # --- Static plot ---
+    set.seed(42)
+    g_tidy <- as_tbl_graph(g)
+
+    p_net <- ggraph(g_tidy, layout = "fr") +
+      geom_edge_link(aes(width = combined_score, alpha = combined_score), color = "grey60") +
+      scale_edge_width(range = c(0.15, 1.2), guide = "none") +
+      scale_edge_alpha(range = c(0.15, 0.6), guide = "none") +
+      geom_node_point(data = function(x) x[x$type == "Gene", ],
+        aes(fill = direction, shape = persistence, size = pmin(pmax(abs(log2FC), 0.5, na.rm = TRUE), 4, na.rm = TRUE),
+            stroke = ifelse(is_DEG, 1.2, 0.3)), color = "grey40") +
+      geom_node_point(data = function(x) x[x$type == "TF", ],
+        aes(fill = "TF", size = node_size, stroke = ifelse(is_DEG, 1.5, 0.3)),
+        shape = 21, color = "black") +
+      geom_node_text(aes(label = name, filter = (type == "TF" | degree >= 2 | (!is.na(log2FC) & abs(log2FC) >= 2))),
+        size = 2.2, repel = TRUE, max.overlaps = 100,
+        box.padding = 0.15, point.padding = 0.15, segment.color = "grey70") +
+      scale_fill_manual(
+        values = c(direction_colors, "TF" = tf_fill),
+        breaks = c("Up", "Down", "Mixed", "TF"),
+        na.value = "grey50",
+        guide = guide_legend(title = "Direction", override.aes = list(size = 4))) +
+      scale_shape_manual(
+        values = c("Transient" = 21, "Sustained" = 24, "Secondary_Deferred" = 22,
+                   "Divergent" = 18, "Unknown" = 1),
+        guide = guide_legend(title = "Persistence", override.aes = list(fill = "grey50"))) +
+      scale_size_continuous(range = c(1, 8), guide = "none") +
+      labs(title = paste0("TF → Target Gene Network: ", net_name),
+           subtitle = paste0(length(tf_nodes), " enriched TFs, ", length(gene_nodes),
+                             " target genes, ", nrow(edges_df), " edges, ", n_comm, " modules"),
+            caption = "Red=up, Blue=down · ▲=transient, ■=deferred, ◆=sustained, ◆=divergent · Size=|log2FC|") +
+      theme_graph(base_family = "sans") + theme(legend.position = "bottom")
+
+    tag <- tolower(net_name)
+    ggsave(file.path(out_dir, "tf", paste0("tf_regulatory_network_", tag, ".pdf")),
+           p_net, width = 16, height = 14)
+    ggsave(file.path(out_dir, "tf", paste0("tf_regulatory_network_", tag, ".png")),
+           p_net, width = 16, height = 14, dpi = 150)
+    cat(sprintf("  Saved tf_regulatory_network_%s.pdf / .png\n", tag))
+
+    # --- Interactive plot ---
+    vis_nodes <- data.frame(
+      id = V(g)$name, label = V(g)$name,
+      group = ifelse(V(g)$type == "TF", "TF", V(g)$direction),
+      title = ifelse(V(g)$type == "TF",
+        paste0(V(g)$name, "\nLibrary: ", short_lib_net[V(g)$library],
+               "\np-value: ", formatC(V(g)$adj_pvalue, format="e", digits=2),
+               "\nTargets: ", V(g)$degree),
+        paste0(V(g)$name, "\nDirection: ", V(g)$direction,
+               ifelse(!is.na(V(g)$log2FC), paste0("\nlog2FC: ", round(V(g)$log2FC, 3)), ""),
+               "\nPersistence: ", V(g)$persistence,
+               ifelse(V(g)$is_DEG, "\n[IS DEG]", ""), "\nDegree: ", V(g)$degree)),
+      shape = ifelse(V(g)$type == "TF", "dot",
+              ifelse(V(g)$persistence == "Transient", "triangle",
+              ifelse(V(g)$persistence == "Secondary_Deferred", "square",
+              ifelse(V(g)$persistence == "Sustained", "diamond",
+              ifelse(V(g)$persistence == "Divergent", "star", "dot"))))),
+      size = ifelse(V(g)$type == "TF", V(g)$node_size * 3,
+                    pmin(pmax(abs(V(g)$log2FC), 0.5, na.rm = TRUE), 4) * 4),
+      stringsAsFactors = FALSE
+    )
+
+    vis_edges <- data.frame(
+      from = edges_df$from, to = edges_df$to,
+      title = paste0("Score: ", round(edges_df$combined_score, 1),
+                     "\nGene set: ", edges_df$gene_set),
+      value = pmin(edges_df$combined_score / 10, 5),
+      stringsAsFactors = FALSE
+    )
+
+    vis_net <- visNetwork(vis_nodes, vis_edges, width = "100%", height = "800px") %>%
+      visGroups(groupname = "TF", color = list(background = "#FF7F00", border = "black"),
+                shape = "dot") %>%
+      visGroups(groupname = "Up", color = list(background = "#E41A1C", border = "grey40")) %>%
+      visGroups(groupname = "Down", color = list(background = "#377EB8", border = "grey40")) %>%
+      visGroups(groupname = "Mixed", color = list(background = "grey70", border = "grey40")) %>%
+      visOptions(highlightNearest = list(enabled = TRUE, degree = 1, hover = TRUE),
+                 nodesIdSelection = TRUE) %>%
+      visEdges(arrows = "to", smooth = FALSE, scaling = list(min = 1, max = 5)) %>%
+      visPhysics(solver = "barnesHut",
+                 barnesHut = list(gravitationalConstant = -3000, centralGravity = 0.3,
+                                  springLength = 150, springConstant = 0.04),
+                 stabilization = list(iterations = 300, fit = TRUE)) %>%
+      visInteraction(navigationButtons = TRUE, dragNodes = TRUE) %>%
+      visLayout(randomSeed = 42) %>%
+      visLegend(width = 0.22, position = "right",
+                main = "Color = direction · Shape = persistence",
+                useGroups = FALSE,
+                addNodes = list(
+                  list(label = "TF (enriched)", shape = "dot", color = "#FF7F00", size = 18),
+                  list(label = "Gene up (log2FC > 0)", shape = "dot", color = "#E41A1C", size = 14),
+                  list(label = "Gene down (log2FC < 0)", shape = "dot", color = "#377EB8", size = 14),
+                  list(label = "Mixed / unknown", shape = "dot", color = "grey70", size = 14),
+                  list(label = "Transient", shape = "triangle", color = "grey70", size = 14),
+                  list(label = "Secondary Deferred", shape = "square", color = "grey70", size = 14),
+                  list(label = "Sustained", shape = "diamond", color = "grey70", size = 14),
+                  list(label = "Divergent (differs per cell line)", shape = "star", color = "grey70", size = 14)
+                ))
+
+    visSave(vis_net, file.path(out_dir, "tf", paste0("tf_regulatory_network_", tag, ".html")),
+            selfcontained = TRUE)
+    cat(sprintf("  Saved tf_regulatory_network_%s.html\n", tag))
+  }
 
 } else {
   cat("Not enough significant TFs for network visualization.\n")
