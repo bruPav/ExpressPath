@@ -83,9 +83,15 @@ persist_file   = f"{temporal_dir}/persistence_classes.tsv"
 gene_act_file  = f"{temporal_dir}/gene_activity.tsv"
 
 # Cross-cell-line
-cross_shared_file   = f"{cross_dir}/cross_cellline_shared.tsv"
-cross_specific_file = f"{cross_dir}/cross_cellline_specific.tsv"
-cross_persist_file  = f"{cross_dir}/cross_persistence.tsv"
+cross_shared_file     = f"{cross_dir}/cross_cellline_shared.tsv"
+cross_specific_file   = f"{cross_dir}/cross_cellline_specific.tsv"
+cross_persist_file    = f"{cross_dir}/cross_persistence.tsv"
+
+# Cross-cell-line temporal analysis (Step G)
+cross_tpersist_file   = f"{cross_dir}/cross_temporal_persistence.tsv"
+cross_tga_file        = f"{cross_dir}/cross_temporal_gene_activity.tsv"
+cross_tvel_file       = f"{cross_dir}/cross_temporal_velocity.tsv"
+cross_tvenn_file      = f"{cross_dir}/cross_temporal_venn_genelists.tsv"
 
 # TF enrichment
 tf_results_file  = f"{tf_dir}/tf_enrichment_results.tsv"
@@ -144,7 +150,11 @@ rule deseq2_analysis:
         gene_act      = gene_act_file,
         cross_shared  = cross_shared_file,
         cross_specific = cross_specific_file,
-        cross_persist = cross_persist_file
+        cross_persist = cross_persist_file,
+        cross_tpersist = cross_tpersist_file,
+        cross_tga     = cross_tga_file,
+        cross_tvel    = cross_tvel_file,
+        cross_tvenn   = cross_tvenn_file
     params:
         pvalue = pvalue_val,
         design = design_json,
@@ -180,9 +190,10 @@ rule pathway_analysis:
 # --- Step 3b: TF target enrichment (enrichR) ---
 rule tf_enrichment:
     input:
-        cross_shared = cross_shared_file,
-        persist      = persist_file,
-        annot        = annot_file
+        cross_shared  = cross_shared_file,
+        persist       = persist_file,
+        cross_tpersist = cross_tpersist_file,
+        annot         = annot_file
     output:
         results  = tf_results_file,
         heat_pdf = tf_heatmap_pdf,
@@ -198,17 +209,21 @@ rule tf_enrichment:
 # --- Step 4: Interactive HTML report ---
 rule interactive_report:
     input:
-        combined      = combined_file,
-        gsea_kegg     = gsea_kegg_file,
-        gsea_go       = gsea_go_file,
-        cluster       = cluster_file,
-        cluster_p     = cluster_prof,
-        velocity      = velocity_file,
-        venn          = venn_file,
-        persist       = persist_file,
-        gene_act      = gene_act_file,
-        cross_shared  = cross_shared_file,
-        tf_results    = tf_results_file
+        combined       = combined_file,
+        gsea_kegg      = gsea_kegg_file,
+        gsea_go        = gsea_go_file,
+        cluster        = cluster_file,
+        cluster_p      = cluster_prof,
+        velocity       = velocity_file,
+        venn           = venn_file,
+        persist        = persist_file,
+        gene_act       = gene_act_file,
+        cross_shared   = cross_shared_file,
+        cross_tpersist = cross_tpersist_file,
+        cross_tvel     = cross_tvel_file,
+        cross_tga      = cross_tga_file,
+        cross_tvenn    = cross_tvenn_file,
+        tf_results     = tf_results_file
     output:
         report = report_file
     params:

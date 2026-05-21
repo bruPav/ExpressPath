@@ -50,9 +50,22 @@ persist_df <- read.table(file.path(out_dir, "temporal", "persistence_classes.tsv
 annot <- read.table(file.path(out_dir, "tables", "gene_annotations.tsv"),
                     header = TRUE, sep = "\t", stringsAsFactors = FALSE,
                     quote = "", fill = TRUE, comment.char = "")
+
+# Cross-temporal persistence (Step G)
+cross_tpersist_file <- file.path(out_dir, "cross", "cross_temporal_persistence.tsv")
+if (file.exists(cross_tpersist_file)) {
+  cross_tpersist <- read.table(cross_tpersist_file,
+                                header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+  cat(sprintf("Loaded cross_tpersist: %d rows\n", nrow(cross_tpersist)))
+} else {
+  cross_tpersist <- data.frame(gene_id = character(), pair = character(),
+                                category = character(), n_timepoints = integer(),
+                                stringsAsFactors = FALSE)
+}
+
 colnames(annot)[1] <- "gene_id"
-cat(sprintf("Loaded: cross_shared=%d, persist=%d, annotations=%d\n",
-            nrow(cross_shared), nrow(persist_df), nrow(annot)))
+cat(sprintf("Loaded: cross_shared=%d, persist=%d, cross_tpersist=%d, annotations=%d\n",
+            nrow(cross_shared), nrow(persist_df), nrow(cross_tpersist), nrow(annot)))
 
 # --- 2. Build gene_id → gene_symbol mapping ---
 id2sym <- setNames(annot$gene_symbol, annot$gene_id)
@@ -94,6 +107,53 @@ if (nrow(persist_df) > 0) {
     })
     cross_sustained <- Reduce(intersect, sustained_per_cl)
     gene_sets[["Cross_Sustained"]] <- cross_sustained
+  }
+}
+
+# 3d. Cross-temporal persistence categories (Step G)
+if (nrow(cross_tpersist) > 0) {
+  for (cat_val in unique(cross_tpersist$category)) {
+    set_name <- paste0("Divergence_", cat_val)
+    gene_sets[[set_name]] <- cross_tpersist$gene_id[cross_tpersist$category == cat_val]
+  }
+
+  # Cross-Emergent: all emergent patterns combined
+  emergent_genes <- cross_tpersist$gene_id[
+    grepl("^Emergent", cross_tpersist$category)
+  ]
+  if (length(emergent_genes) > 0) {
+    gene_sets[["Divergence_Emergent_All"]] <- emergent_genes
+  }
+
+  # Divergence up/down: emergent genes with known direction
+  cross_ga_file <- file.path(out_dir, "cross", "cross_temporal_gene_activity.tsv")
+  if (file.exists(cross_ga_file)) {
+    cross_ga <- read.table(cross_ga_file,
+                           header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+    for (dset in c("Divergence_Emergent_All", "Divergence_Constitutive")) {
+      orig <- if (dset == "Divergence_Emergent_All") "Emergent" else "Constitutive"
+      ga_sub <- cross_ga[grepl(paste0("^", orig), cross_ga$category), ]
+      if (nrow(ga_sub) > 0) {
+        # Find the treatment timepoint with the largest abs log2FC to determine direction
+        lfc_cols <- grep("^log2FC_", names(ga_sub), value = TRUE)
+        if (length(lfc_cols) > 0) {
+          ga_sub$max_lfc <- apply(ga_sub[, lfc_cols, drop = FALSE], 1,
+                                   function(x) {
+                                     abs_x <- abs(as.numeric(x))
+                                     if (all(is.na(abs_x))) return(NA)
+                                     as.numeric(x)[which.max(abs_x)]
+                                   })
+          up_genes   <- ga_sub$gene_id[ga_sub$max_lfc > 0 & !is.na(ga_sub$max_lfc)]
+          down_genes <- ga_sub$gene_id[ga_sub$max_lfc < 0 & !is.na(ga_sub$max_lfc)]
+          if (length(up_genes) > 0) {
+            gene_sets[[paste0(dset, "_Up")]] <- up_genes
+          }
+          if (length(down_genes) > 0) {
+            gene_sets[[paste0(dset, "_Down")]] <- down_genes
+          }
+        }
+      }
+    }
   }
 }
 
@@ -366,11 +426,12 @@ if (nrow(sig_tfs) > 0) {
   gs_type <- sapply(colnames(heat_mat), function(gs) {
     if (grepl("^Shared_", gs)) "Shared"
     else if (grepl("^Cross_", gs)) "Cross"
+    else if (grepl("^Divergence_", gs)) "Divergence"
     else "Per_CellLine"
   })
   ann_col <- data.frame(Type = gs_type, row.names = colnames(heat_mat))
-  type_colors <- setNames(c("#FF7F00", "#377EB8", "#4DAF4A"),
-                          c("Shared", "Per_CellLine", "Cross"))
+  type_colors <- setNames(c("#FF7F00", "#377EB8", "#4DAF4A", "#E41A1C"),
+                          c("Shared", "Per_CellLine", "Cross", "Divergence"))
 
   ann_colors_full <- list(
     Library = lib_colors[intersect(names(lib_colors), unique(ann_row$Library))],

@@ -359,9 +359,9 @@ for (cl in cl_levs) {
     )
   }
 }
-# Between cell lines: at ref time and last nonref time
+# Between cell lines: at every timepoint (not just ref + last)
 if (length(cl_levs) >= 2) {
-  for (tp in c(ref_tp, tail(nonref_tps, 1))) {
+  for (tp in tp_levs) {
     tname <- paste0(nonref_cl, "_vs_", ref_cl, "_", tp)
     diff_tests[[tname]] <- list(
       samples_a = metadata$sample_id[metadata$cell_line == nonref_cl & metadata$time == tp],

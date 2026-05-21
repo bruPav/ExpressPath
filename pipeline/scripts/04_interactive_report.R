@@ -66,6 +66,12 @@ venn_genes    <- tryRead(file.path(results_dir, "temporal", "venn_genelists.tsv"
 persist       <- tryRead(file.path(results_dir, "temporal", "persistence_classes.tsv"))
 gene_activity <- tryRead(file.path(results_dir, "temporal", "gene_activity.tsv"))
 
+# Cross-temporal analysis (Step G)
+cross_tpersist <- tryRead(file.path(results_dir, "cross", "cross_temporal_persistence.tsv"))
+cross_tvel      <- tryRead(file.path(results_dir, "cross", "cross_temporal_velocity.tsv"))
+cross_tga       <- tryRead(file.path(results_dir, "cross", "cross_temporal_gene_activity.tsv"))
+cross_tvenn     <- tryRead(file.path(results_dir, "cross", "cross_temporal_venn_genelists.tsv"))
+
 # Map ENSG -> ENTREZ
 ensg_ids <- combined$gene_id
 id_map <- bitr(ensg_ids, fromType = "ENSEMBL", toType = "ENTREZID",
@@ -982,6 +988,156 @@ if (has_temporal) {
 </div>'
 }
 
+# ─── Cross-Temporal Divergence Tab ───
+has_cross_temporal <- nrow(cross_tvel) > 0 || nrow(cross_tga) > 0
+
+cross_divergence_tab <- ''
+
+if (has_cross_temporal) {
+  # Velocity bar chart data
+  ct_velocity_bar_json <- "{}"
+  ct_velocity_tbl_html <- ""
+  if (nrow(cross_tvel) > 0) {
+    ct_vel_traces <- list()
+    pairs <- unique(cross_tvel$pair)
+    colors <- c("#FF7F00", "#4DAF4A", "#377EB8", "#E41A1C", "#984EA3", "#A65628")
+    for (i in seq_along(pairs)) {
+      pr <- pairs[i]
+      pr_data <- cross_tvel[cross_tvel$pair == pr, ]
+      cl <- colors[((i - 1) %% length(colors)) + 1]
+      ct_vel_traces[[length(ct_vel_traces) + 1]] <- list(
+        x = pr_data$timepoint, y = pr_data$n_up, type = "bar",
+        name = paste0(pr, " Up"), marker = list(color = cl))
+      ct_vel_traces[[length(ct_vel_traces) + 1]] <- list(
+        x = pr_data$timepoint, y = pr_data$n_down, type = "bar",
+        name = paste0(pr, " Down"), marker = list(color = cl), opacity = 0.5)
+    }
+    ct_velocity_bar_json <- jsonlite::toJSON(ct_vel_traces, auto_unbox = TRUE, force = TRUE)
+    for (i in seq_len(nrow(cross_tvel))) {
+      row <- cross_tvel[i, ]
+      ct_velocity_tbl_html <- paste0(ct_velocity_tbl_html,
+        sprintf('<tr><td>%s</td><td>%s</td><td>%d</td><td>%d</td><td>%d</td><td>%.3f</td></tr>',
+                row$pair, row$timepoint, row$n_up, row$n_down, row$n_total, row$mean_abs_log2FC))
+    }
+  }
+
+  # Base64 encode cross-temporal images
+  ct_venn_imgs <- list()
+  ct_heat_imgs <- list()
+  for (pr in unique(c(cross_tvel$pair, cross_tga$pair))) {
+    tag <- gsub("_vs_", "v", pr)
+    # Venn
+    venn_path <- file.path(results_dir, "cross", paste0("cross_temporal_venn_", tag, ".png"))
+    if (file.exists(venn_path)) {
+      ct_venn_imgs[[pr]] <- base64encode(readBin(venn_path, "raw", file.info(venn_path)$size))
+    }
+    # Heatmap
+    heat_path <- file.path(results_dir, "cross", paste0("cross_temporal_activity_heatmap_", tag, ".png"))
+    if (file.exists(heat_path)) {
+      ct_heat_imgs[[pr]] <- base64encode(readBin(heat_path, "raw", file.info(heat_path)$size))
+    }
+  }
+
+  ct_venn_html <- ""
+  if (length(ct_venn_imgs) > 0) {
+    for (pr in names(ct_venn_imgs)) {
+      ct_venn_html <- paste0(ct_venn_html,
+        sprintf('<div class="col-md-6 mb-3"><div class="card"><div class="card-header fw-bold">%s</div><div class="card-body text-center"><img src="data:image/png;base64,%s" class="img-fluid" style="max-height:500px"></div></div></div>',
+                pr, ct_venn_imgs[[pr]]))
+    }
+  }
+
+  ct_heat_html <- ""
+  if (length(ct_heat_imgs) > 0) {
+    for (pr in names(ct_heat_imgs)) {
+      ct_heat_html <- paste0(ct_heat_html,
+        sprintf('<div class="col-md-12 mb-3"><div class="card"><div class="card-header fw-bold">%s</div><div class="card-body text-center"><img src="data:image/png;base64,%s" class="img-fluid"></div></div></div>',
+                pr, ct_heat_imgs[[pr]]))
+    }
+  }
+
+  # Gene activity table
+  ct_gene_act_tbl_html <- ""
+  ct_gene_act_header <- '<th>Gene</th><th>Pair</th>'
+  if (nrow(cross_tga) > 0) {
+    sig_cols <- grep("^sig_", names(cross_tga), value = TRUE)
+    for (sc in sig_cols) {
+      ct_gene_act_header <- paste0(ct_gene_act_header,
+        sprintf('<th class="text-center">%s sig</th>', sub("^sig_", "", sc)))
+    }
+    lfc_cols <- grep("^log2FC_", names(cross_tga), value = TRUE)
+    for (lc in lfc_cols) {
+      ct_gene_act_header <- paste0(ct_gene_act_header,
+        sprintf('<th class="text-end">%s log2FC</th>', sub("^log2FC_", "", lc)))
+    }
+    ct_gene_act_header <- paste0(ct_gene_act_header, '<th>Divergence Category</th>')
+
+    for (i in seq_len(min(nrow(cross_tga), 2000))) {
+      row <- cross_tga[i, ]
+      sig_html <- paste(sapply(sig_cols, function(sc) {
+        sprintf('<td class="text-center">%s</td>', if (isTRUE(row[[sc]])) "&#10003;" else "")
+      }), collapse = "")
+      lfc_html <- paste(sapply(lfc_cols, function(lc) {
+        v <- row[[lc]]
+        sprintf('<td class="text-end">%s</td>', if (is.na(v)) "" else sprintf("%+.2f", v))
+      }), collapse = "")
+      ct_gene_act_tbl_html <- paste0(ct_gene_act_tbl_html,
+        sprintf('<tr><td>%s</td><td>%s</td>%s%s<td>%s</td></tr>',
+                row$gene_symbol %||% row$gene_id, row$pair, sig_html, lfc_html, row$category))
+    }
+  }
+
+  # Full divergence tab
+  cross_divergence_tab <- paste0('
+<div class="tab-pane fade" id="divergence">
+  <ul class="nav nav-tabs mb-3" role="tablist">
+    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#div-velocity" type="button">Divergence Velocity</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#div-patterns" type="button">Divergence Patterns</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#div-genes" type="button">Gene Table</button></li>
+  </ul>
+  <div class="tab-content">
+    <!-- Velocity -->
+    <div class="tab-pane fade show active" id="div-velocity">
+      <div class="row">
+        <div class="col-md-6">
+          <h6>Between-Cell-Line DEG Count per Time Point</h6>
+          <div id="ctVelocityBar" style="height:400px"></div>
+        </div>
+        <div class="col-md-6">
+          <h6>Summary Table</h6>
+          <table class="table table-sm table-striped">
+            <thead><tr><th>Pair</th><th>Time</th><th>Up</th><th>Down</th><th>Total</th><th>Mean |log2FC|</th></tr></thead>
+            <tbody>', ct_velocity_tbl_html, '</tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <!-- Patterns -->
+    <div class="tab-pane fade" id="div-patterns">
+      <h5>Cross-Timepoint Gene Overlap <small class="text-muted">Venn diagrams of between-cell-line DEGs across timepoints</small></h5>
+      <div class="row">', ct_venn_html, '</div>
+      <h5 class="mt-3">Cell Line Divergence Heatmaps <small class="text-muted">between-cell-line log2FC per timepoint, annotated by divergence category</small></h5>
+      <div class="row">', ct_heat_html, '</div>
+    </div>
+    <!-- Gene Table -->
+    <div class="tab-pane fade" id="div-genes">
+      <h5>Cross-Temporal Gene Activity Table <small class="text-muted">searchable, sortable — which genes differ between cell lines at which timepoint</small></h5>
+      <div style="max-height:500px;overflow-y:auto">
+        <table class="table table-sm table-striped" id="ctGeneActTable">
+          <thead><tr>', ct_gene_act_header, '</tr></thead>
+          <tbody>', ct_gene_act_tbl_html, '</tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>')
+} else {
+  cross_divergence_tab <- '
+<div class="tab-pane fade" id="divergence">
+  <div class="alert alert-info">Cross-cell-line temporal analysis was not run. Check that cross-temporal analysis outputs exist.</div>
+</div>'
+}
+
 # --- Build head HTML manually (htmltools drops head tags) ---
 head_html <- sprintf('
 <head>
@@ -1055,7 +1211,11 @@ body_html <- as.character(tags$body(
                       `data-bs-target` = "#pathways", type = "button", "Pathway Browser")),
         tags$li(class = "nav-item",
           tags$button(class = "nav-link", id = "tab-temporal", `data-bs-toggle` = "tab",
-                      `data-bs-target` = "#temporal", type = "button", "Temporal Kinetics"))
+                      `data-bs-target` = "#temporal", type = "button", "Temporal Kinetics")),
+        if (has_cross_temporal) tags$li(class = "nav-item",
+          tags$button(class = "nav-link", id = "tab-divergence", `data-bs-toggle` = "tab",
+                      `data-bs-target` = "#divergence", type = "button", "Cell Line Divergence"))
+        else HTML("")
       ),
 
       tags$div(class = "tab-content",
@@ -1114,7 +1274,9 @@ body_html <- as.character(tags$body(
           HTML(all_cards)
         ),
         # Temporal Kinetics tab
-        HTML(temporal_tab)
+        HTML(temporal_tab),
+        # Cell Line Divergence tab
+        HTML(cross_divergence_tab)
       )
     ),
 
@@ -1293,7 +1455,31 @@ $(document).ready(function() {
 </script>',
       cluster_plotly,
       velocity_bar_json
-    )) else HTML("")
+    )) else HTML(""),
+    # Cross-temporal divergence JavaScript
+    if (has_cross_temporal) HTML(sprintf('<script>
+$(document).ready(function() {
+  var ctVeloRendered = false;
+  function renderCTVelocity() {
+    if (ctVeloRendered) return;
+    ctVeloRendered = true;
+    var ctVeloData = %s;
+    var ctVeloLayout = {
+      title: "", xaxis: { title: "Time Point" }, yaxis: { title: "Cross-Cell-Line DEGs" },
+      height: 400, margin: { l: 60, r: 20, t: 30, b: 50 },
+      barmode: "group",
+      legend: { font: { size: 10 }, orientation: "h", y: 1.15 }
+    };
+    Plotly.newPlot("ctVelocityBar", ctVeloData, ctVeloLayout);
+  }
+  document.getElementById("tab-divergence").addEventListener("shown.bs.tab", function(e) {
+    renderCTVelocity();
+  });
+  if (document.getElementById("ctGeneActTable")) {
+    $("#ctGeneActTable").DataTable({ pageLength: 25, searching: true, info: true, lengthChange: false, order: [] });
+  }
+});
+</script>', ct_velocity_bar_json)) else HTML("")
   ))
 
 # Combine into full HTML document

@@ -18,6 +18,9 @@ pvalue_threshold: 0.05                               # alpha for significance
 temporal_n_clusters: 6                               # Number of Mfuzz clusters ("auto" for automatic)
 temporal_foldchange_threshold: 0                     # |log2FC| threshold for persistence/Venn classification (0 disables)
 
+# ─── Cross-Cell-Line Temporal Analysis ───
+cross_temporal_analysis: true                        # Run inverse cross → temporal persistence on between-cell-line contrasts
+
 # ─── GSEA ───
 gsea_min_set_size: 15                                # Min genes in a KEGG pathway
 gsea_max_set_size: 500                               # Max genes in a KEGG pathway

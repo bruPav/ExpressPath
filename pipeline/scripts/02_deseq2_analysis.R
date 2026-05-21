@@ -1466,5 +1466,445 @@ if (length(cl_ids) >= 2 && length(nonref_tps) >= 1) {
               sep = "\t", row.names = FALSE, quote = FALSE)
 }
 
+# ─── 13. Part G: Cross-Cell-Line Temporal Analysis ───
+# Inverse of Part F: use between-cell-line contrasts to analyze
+# how cell-line differences evolve over time
+cat("\n=== Part G: Cross-Cell-Line Temporal Analysis ===\n")
+
+if (length(cl_ids) >= 2 && length(tp_ids) >= 2) {
+
+  # G1: Discover between-cell-line contrast names from combined results columns
+  all_ct_cols <- gsub("_log2FC$", "", grep("_log2FC$", names(combined), value = TRUE))
+
+  cross_btwn_ct <- list()
+  for (ct in all_ct_cols) {
+    if (!grepl("_vs_", ct)) next
+    parts <- strsplit(ct, "_vs_")[[1]]
+    if (length(parts) != 2) next
+    cl_a <- parts[1]
+    if (!cl_a %in% cl_ids) next
+
+    right <- parts[2]
+    matched_cl <- NULL
+    for (cl in cl_ids) {
+      if (startsWith(right, paste0(cl, "_"))) {
+        matched_cl <- cl
+        break
+      }
+    }
+    if (is.null(matched_cl)) next
+
+    tp <- sub(paste0("^", matched_cl, "_"), "", right)
+    pair_key <- paste(sort(c(cl_a, matched_cl)), collapse = "_vs_")
+
+    if (is.null(cross_btwn_ct[[pair_key]])) {
+      cross_btwn_ct[[pair_key]] <- list()
+    }
+    cross_btwn_ct[[pair_key]][[tp]] <- ct
+  }
+
+  cat(sprintf("Discovered %d between-cell-line pair(s)\n", length(cross_btwn_ct)))
+
+  if (length(cross_btwn_ct) > 0 && any(sapply(cross_btwn_ct, length) >= 2)) {
+
+    # G2: Build cross-temporal DEG sets and classify persistence
+    cross_temp_persistence <- list()
+    cross_temp_gene_activity <- list()
+    cross_temp_velocity <- list()
+    cross_temp_venn <- list()
+
+    for (pair_key in names(cross_btwn_ct)) {
+      ct_map <- cross_btwn_ct[[pair_key]]
+      tp_order <- names(ct_map)
+
+      # Sort timepoints by temporal order
+      tp_order_vals <- numeric(length(tp_order))
+      for (k in seq_along(tp_order)) {
+        idx <- which(sapply(tp_list, `[[`, "id") == tp_order[k])
+        tp_order_vals[k] <- if (length(idx) > 0) tp_list[[idx]]$temporal_order else 999
+      }
+      tp_order <- tp_order[order(tp_order_vals)]
+
+      if (length(tp_order) < 2) next
+
+      cl_a <- strsplit(pair_key, "_vs_")[[1]][1]
+      cl_b <- strsplit(pair_key, "_vs_")[[1]][2]
+
+      cat(sprintf("\n  Pair: %s vs %s (%d timepoints)\n", cl_a, cl_b, length(tp_order)))
+
+      # Build DEG sets per timepoint
+      ct_deg_sets <- list()
+      ct_lfc_vals <- list()
+      ct_padj_vals <- list()
+
+      for (tp in tp_order) {
+        cname <- ct_map[[tp]]
+        padj_col <- paste0(cname, "_padj")
+        lfc_col  <- paste0(cname, "_log2FC")
+
+        if (!padj_col %in% names(combined) || !lfc_col %in% names(combined)) next
+
+        is_sig <- combined[[padj_col]] < alpha_val & !is.na(combined[[padj_col]])
+        if (temporal_fc_thresh > 0) {
+          is_sig <- is_sig & abs(combined[[lfc_col]]) >= temporal_fc_thresh
+        }
+
+        ct_deg_sets[[tp]] <- combined$gene_id[which(is_sig)]
+
+        tmp_lfc <- combined[[lfc_col]]; tmp_padj <- combined[[padj_col]]
+        names(tmp_lfc) <- names(tmp_padj) <- combined$gene_id
+        ct_lfc_vals[[tp]] <- tmp_lfc
+        ct_padj_vals[[tp]] <- tmp_padj
+
+        # Venn genelists
+        deg_genes <- combined$gene_id[which(is_sig)]
+        for (g in deg_genes) {
+          cross_temp_venn[[length(cross_temp_venn) + 1]] <- data.frame(
+            pair = pair_key, timepoint = tp, gene_id = g,
+            stringsAsFactors = FALSE
+          )
+        }
+
+        n_sig <- length(deg_genes)
+        cat(sprintf("    %s: %d DEGs\n", tp, n_sig))
+
+        cross_temp_velocity[[length(cross_temp_velocity) + 1]] <- data.frame(
+          pair = pair_key, timepoint = tp,
+          n_up   = sum(is_sig & combined[[lfc_col]] > 0, na.rm = TRUE),
+          n_down = sum(is_sig & combined[[lfc_col]] < 0, na.rm = TRUE),
+          n_total = n_sig,
+          mean_abs_log2FC = round(mean(abs(combined[[lfc_col]][which(is_sig)]), na.rm = TRUE), 4),
+          stringsAsFactors = FALSE
+        )
+      }
+
+      # Classify cross-cell-line persistence
+      all_cross_genes <- unique(unlist(ct_deg_sets))
+      treatment_tps <- setdiff(tp_order, ref_tp)
+      first_tp <- tp_order[1]
+      last_tp  <- tail(tp_order, 1)
+      n_total_tps <- length(tp_order)
+
+      for (gene in all_cross_genes) {
+        tps_present <- names(ct_deg_sets)[sapply(ct_deg_sets, function(s) gene %in% s)]
+        n_tps <- length(tps_present)
+        has_first <- first_tp %in% tps_present
+        has_last  <- last_tp %in% tps_present
+        has_all_treatment <- length(treatment_tps) > 0 &&
+          all(sapply(treatment_tps, function(tp) tp %in% tps_present))
+
+        if (n_tps == n_total_tps) {
+          category <- "Constitutive"
+        } else if (n_tps == 1) {
+          if (first_tp %in% tps_present && first_tp == ref_tp) {
+            category <- "Baseline_Only"
+          } else if (length(treatment_tps) >= 1 && tps_present == treatment_tps[1]) {
+            category <- "Emergent_Early"
+          } else if (length(treatment_tps) >= 1 && tps_present == tail(treatment_tps, 1)) {
+            category <- "Emergent_Late"
+          } else {
+            category <- "Emergent_Mid"
+          }
+        } else {
+          if (has_first && first_tp == ref_tp && !has_last) {
+            category <- "Convergent"
+          } else if (!has_first && has_all_treatment && n_tps == length(treatment_tps)) {
+            category <- "Emergent_Sustained"
+          } else if (!has_first) {
+            category <- "Emergent_Complex"
+          } else {
+            category <- "Complex"
+          }
+        }
+
+        cross_temp_persistence[[length(cross_temp_persistence) + 1]] <- data.frame(
+          gene_id = gene, pair = pair_key, category = category,
+          n_timepoints = n_tps, stringsAsFactors = FALSE
+        )
+
+        # Gene activity row
+        gsym <- combined$gene_symbol[match(gene, combined$gene_id)]
+        row <- data.frame(gene_id = gene, gene_symbol = gsym, pair = pair_key,
+                          category = category, stringsAsFactors = FALSE)
+        for (tp in tp_order) {
+          lfc_v  <- if (gene %in% names(ct_lfc_vals[[tp]])) ct_lfc_vals[[tp]][gene] else NA
+          padj_v <- if (gene %in% names(ct_padj_vals[[tp]])) ct_padj_vals[[tp]][gene] else NA
+          is_s   <- gene %in% ct_deg_sets[[tp]]
+          row[[paste0("sig_", tp)]] <- is_s
+          row[[paste0("log2FC_", tp)]] <- round(lfc_v, 4)
+          row[[paste0("padj_", tp)]] <- if (is.na(padj_v)) NA else round(padj_v, 6)
+        }
+        cross_temp_gene_activity[[length(cross_temp_gene_activity) + 1]] <- row
+      }
+
+      # G3: Venn/UpSet plot for cross-timepoint between-cell-line DEGs
+      n_sets <- length(ct_deg_sets)
+      if (n_sets >= 2 && n_sets <= 3) {
+        tag <- gsub("_vs_", "v", pair_key)
+        pdf(file.path(out_dir, "cross", paste0("cross_temporal_venn_", tag, ".pdf")),
+            width = if (n_sets == 2) 7 else 11,
+            height = if (n_sets == 2) 7 else 10)
+        if (n_sets == 2) {
+          grid.newpage()
+          draw.pairwise.venn(
+            area1 = length(ct_deg_sets[[1]]), area2 = length(ct_deg_sets[[2]]),
+            cross.area = length(intersect(ct_deg_sets[[1]], ct_deg_sets[[2]])),
+            category = names(ct_deg_sets),
+            fill = c("#FF7F00", "#4DAF4A"), alpha = 0.5,
+            cex = 1.5, cat.cex = 1.3, cat.pos = c(-30, 30), margin = 0.05
+          )
+        } else {
+          a12  <- length(intersect(ct_deg_sets[[1]], ct_deg_sets[[2]]))
+          a13  <- length(intersect(ct_deg_sets[[1]], ct_deg_sets[[3]]))
+          a23  <- length(intersect(ct_deg_sets[[2]], ct_deg_sets[[3]]))
+          a123 <- length(Reduce(intersect, ct_deg_sets))
+          grid.newpage()
+          draw.triple.venn(
+            area1 = length(ct_deg_sets[[1]]), area2 = length(ct_deg_sets[[2]]),
+            area3 = length(ct_deg_sets[[3]]),
+            n12 = a12, n13 = a13, n23 = a23, n123 = a123,
+            category = names(ct_deg_sets),
+            fill = c("#FF7F00", "#4DAF4A", "#377EB8"), alpha = 0.5,
+            cex = 1.2, cat.cex = 1.2
+          )
+        }
+        dev.off()
+
+        png(file.path(out_dir, "cross", paste0("cross_temporal_venn_", tag, ".png")),
+            width = if (n_sets == 2) 7 else 11,
+            height = if (n_sets == 2) 7 else 10, units = "in", res = 150)
+        if (n_sets == 2) {
+          grid.newpage()
+          draw.pairwise.venn(
+            area1 = length(ct_deg_sets[[1]]), area2 = length(ct_deg_sets[[2]]),
+            cross.area = length(intersect(ct_deg_sets[[1]], ct_deg_sets[[2]])),
+            category = names(ct_deg_sets),
+            fill = c("#FF7F00", "#4DAF4A"), alpha = 0.5,
+            cex = 1.5, cat.cex = 1.3, cat.pos = c(-30, 30), margin = 0.05
+          )
+        } else {
+          a12  <- length(intersect(ct_deg_sets[[1]], ct_deg_sets[[2]]))
+          a13  <- length(intersect(ct_deg_sets[[1]], ct_deg_sets[[3]]))
+          a23  <- length(intersect(ct_deg_sets[[2]], ct_deg_sets[[3]]))
+          a123 <- length(Reduce(intersect, ct_deg_sets))
+          grid.newpage()
+          draw.triple.venn(
+            area1 = length(ct_deg_sets[[1]]), area2 = length(ct_deg_sets[[2]]),
+            area3 = length(ct_deg_sets[[3]]),
+            n12 = a12, n13 = a13, n23 = a23, n123 = a123,
+            category = names(ct_deg_sets),
+            fill = c("#FF7F00", "#4DAF4A", "#377EB8"), alpha = 0.5,
+            cex = 1.2, cat.cex = 1.2
+          )
+        }
+        dev.off()
+        cat(sprintf("  Saved cross_temporal_venn_%s.pdf / .png\n", tag))
+      } else if (n_sets > 3) {
+        # UpSet for >3 timepoints
+        all_deg_genes <- unique(unlist(ct_deg_sets))
+        upset_matrix <- as.data.frame(sapply(names(ct_deg_sets), function(x) {
+          as.integer(all_deg_genes %in% ct_deg_sets[[x]])
+        }))
+        rownames(upset_matrix) <- all_deg_genes
+
+        tag <- gsub("_vs_", "v", pair_key)
+        pdf(file.path(out_dir, "cross", paste0("cross_temporal_upset_", tag, ".pdf")),
+            width = 10, height = 6)
+        print(upset(upset_matrix, intersect = colnames(upset_matrix),
+                    name = paste0("Cross-Temporal Between-Cell-Line DEGs: ", pair_key),
+                    width_ratio = 0.3))
+        dev.off()
+        png(file.path(out_dir, "cross", paste0("cross_temporal_upset_", tag, ".png")),
+            width = 10, height = 6, units = "in", res = 150)
+        print(upset(upset_matrix, intersect = colnames(upset_matrix),
+                    name = paste0("Cross-Temporal Between-Cell-Line DEGs: ", pair_key),
+                    width_ratio = 0.3))
+        dev.off()
+        cat(sprintf("  Saved cross_temporal_upset_%s.pdf / .png\n", tag))
+      }
+
+      # G5: Cross-temporal gene activity heatmap
+      cross_genes <- all_cross_genes
+      if (length(cross_genes) >= 3) {
+        heat_mat <- matrix(NA, nrow = length(cross_genes), ncol = length(tp_order))
+        rownames(heat_mat) <- cross_genes
+        colnames(heat_mat) <- tp_order
+
+        for (i in seq_along(cross_genes)) {
+          for (j in seq_along(tp_order)) {
+            v <- ct_lfc_vals[[tp_order[j]]][cross_genes[i]]
+            if (!is.na(v)) heat_mat[i, j] <- v
+          }
+        }
+        has_val <- rowSums(!is.na(heat_mat)) > 0
+        heat_mat <- heat_mat[has_val, , drop = FALSE]
+
+        # Filter to genes with |log2FC| >= 1 in at least one timepoint
+        max_abs_lfc <- apply(heat_mat, 1, function(x) max(abs(x), na.rm = TRUE))
+        heat_mat <- heat_mat[max_abs_lfc >= 1, , drop = FALSE]
+
+        # Safety cap at 500 most-dynamic genes by row variance
+        if (nrow(heat_mat) > 500) {
+          row_var <- apply(heat_mat, 1, function(x) var(x, na.rm = TRUE))
+          heat_mat <- heat_mat[order(row_var, decreasing = TRUE)[1:500], , drop = FALSE]
+        }
+
+        if (nrow(heat_mat) >= 2) {
+          persist_cats <- sapply(rownames(heat_mat), function(g) {
+            matches <- sapply(cross_temp_persistence, function(x) {
+              if (x$gene_id == g && x$pair == pair_key) x$category else ""
+            })
+            matches <- matches[matches != ""]
+            if (length(matches) > 0) matches[1] else "Unknown"
+          })
+          ann_row <- data.frame(
+            Divergence = factor(persist_cats),
+            row.names = rownames(heat_mat),
+            stringsAsFactors = FALSE
+          )
+
+          cat_colors <- c(
+            "Constitutive" = "#E41A1C", "Baseline_Only" = "#377EB8",
+            "Emergent_Sustained" = "#4DAF4A", "Emergent_Early" = "#FF7F00",
+            "Emergent_Late" = "#984EA3", "Emergent_Mid" = "#A65628",
+            "Emergent_Complex" = "#F781BF", "Convergent" = "#66C2A5",
+            "Complex" = "#999999"
+          )
+          used <- intersect(names(cat_colors), unique(persist_cats))
+          ann_colors <- list(Divergence = cat_colors[used])
+
+          max_abs <- min(max(abs(heat_mat), na.rm = TRUE), 5)
+          if (!is.finite(max_abs) || max_abs == 0) max_abs <- 2
+
+          tag <- gsub("_vs_", "v", pair_key)
+          pdf(file.path(out_dir, "cross", paste0("cross_temporal_activity_heatmap_", tag, ".pdf")),
+              width = min(14, 3 + length(tp_order) * 2),
+              height = max(5, 2 + nrow(heat_mat) * 0.15))
+          pheatmap(heat_mat,
+                   annotation_row  = ann_row,
+                   annotation_colors = ann_colors,
+                   cluster_rows    = TRUE, cluster_cols = FALSE,
+                   show_rownames   = FALSE,
+                   color = colorRampPalette(c("blue", "white", "red"))(100),
+                   breaks = seq(-max_abs, max_abs, length.out = 101),
+                   main = paste0("Cell Line Divergence Over Time: ", pair_key),
+                   fontsize = 10, border_color = NA)
+          dev.off()
+          png(file.path(out_dir, "cross", paste0("cross_temporal_activity_heatmap_", tag, ".png")),
+              width = min(14, 3 + length(tp_order) * 2),
+              height = max(5, 2 + nrow(heat_mat) * 0.15),
+              units = "in", res = 150)
+          pheatmap(heat_mat,
+                   annotation_row  = ann_row,
+                   annotation_colors = ann_colors,
+                   cluster_rows    = TRUE, cluster_cols = FALSE,
+                   show_rownames   = FALSE,
+                   color = colorRampPalette(c("blue", "white", "red"))(100),
+                   breaks = seq(-max_abs, max_abs, length.out = 101),
+                   main = paste0("Cell Line Divergence Over Time: ", pair_key),
+                   fontsize = 10, border_color = NA)
+          dev.off()
+          cat(sprintf("  Saved cross_temporal_activity_heatmap_%s.pdf / .png\n", tag))
+        }
+      }
+    }
+
+    # Write output tables
+    if (length(cross_temp_persistence) > 0) {
+      cross_persist_df <- do.call(rbind, cross_temp_persistence)
+      write.table(cross_persist_df,
+                  file = file.path(out_dir, "cross", "cross_temporal_persistence.tsv"),
+                  sep = "\t", row.names = FALSE, quote = FALSE)
+      cat(sprintf("\nWrote cross_temporal_persistence.tsv (%d rows)\n",
+                  nrow(cross_persist_df)))
+    }
+    if (length(cross_temp_gene_activity) > 0) {
+      cross_ga_df <- do.call(rbind, cross_temp_gene_activity)
+      write.table(cross_ga_df,
+                  file = file.path(out_dir, "cross", "cross_temporal_gene_activity.tsv"),
+                  sep = "\t", row.names = FALSE, quote = FALSE)
+      cat(sprintf("Wrote cross_temporal_gene_activity.tsv (%d rows)\n",
+                  nrow(cross_ga_df)))
+    }
+    if (length(cross_temp_velocity) > 0) {
+      cross_vel_df <- do.call(rbind, cross_temp_velocity)
+      write.table(cross_vel_df,
+                  file = file.path(out_dir, "cross", "cross_temporal_velocity.tsv"),
+                  sep = "\t", row.names = FALSE, quote = FALSE)
+      cat(sprintf("Wrote cross_temporal_velocity.tsv (%d rows)\n",
+                  nrow(cross_vel_df)))
+    }
+    if (length(cross_temp_venn) > 0) {
+      cross_venn_df <- do.call(rbind, cross_temp_venn)
+      write.table(cross_venn_df,
+                  file = file.path(out_dir, "cross", "cross_temporal_venn_genelists.tsv"),
+                  sep = "\t", row.names = FALSE, quote = FALSE)
+      cat(sprintf("Wrote cross_temporal_venn_genelists.tsv (%d rows)\n",
+                  nrow(cross_venn_df)))
+    }
+
+    # G4: Cross-temporal velocity bar plot
+    if (exists("cross_vel_df") && nrow(cross_vel_df) > 0) {
+      p_cv <- ggplot(cross_vel_df, aes(x = timepoint, y = n_total, fill = pair)) +
+        geom_bar(stat = "identity", position = "dodge", width = 0.7) +
+        geom_text(aes(label = n_total), position = position_dodge(0.7),
+                  vjust = -0.3, size = 3) +
+        labs(x = "Time Point", y = "Number of Cross-Cell-Line DEGs",
+             title = "Cell Line Divergence Velocity: Between-Cell-Line DEGs per Timepoint",
+             fill = "Comparison") +
+        theme_minimal(base_size = 14)
+      ggsave(file.path(out_dir, "cross", "cross_temporal_velocity_barplot.pdf"),
+             p_cv, width = 8, height = 5)
+      cat("Saved cross_temporal_velocity_barplot.pdf\n")
+    }
+
+  } else {
+    cat("No between-cell-line contrasts with >= 2 timepoints; skipping cross-temporal analysis.\n")
+    write.table(data.frame(gene_id = character(), pair = character(),
+                            category = character(), n_timepoints = integer(),
+                            stringsAsFactors = FALSE),
+                file = file.path(out_dir, "cross", "cross_temporal_persistence.tsv"),
+                sep = "\t", row.names = FALSE, quote = FALSE)
+    write.table(data.frame(gene_id = character(), gene_symbol = character(),
+                            pair = character(), category = character(),
+                            stringsAsFactors = FALSE),
+                file = file.path(out_dir, "cross", "cross_temporal_gene_activity.tsv"),
+                sep = "\t", row.names = FALSE, quote = FALSE)
+    write.table(data.frame(pair = character(), timepoint = character(),
+                            n_up = integer(), n_down = integer(),
+                            n_total = integer(), mean_abs_log2FC = numeric(),
+                            stringsAsFactors = FALSE),
+                file = file.path(out_dir, "cross", "cross_temporal_velocity.tsv"),
+                sep = "\t", row.names = FALSE, quote = FALSE)
+    write.table(data.frame(pair = character(), timepoint = character(),
+                            gene_id = character(), stringsAsFactors = FALSE),
+                file = file.path(out_dir, "cross", "cross_temporal_venn_genelists.tsv"),
+                sep = "\t", row.names = FALSE, quote = FALSE)
+  }
+
+} else {
+  cat("Fewer than 2 cell lines or fewer than 2 timepoints; skipping cross-temporal analysis.\n")
+  write.table(data.frame(gene_id = character(), pair = character(),
+                          category = character(), n_timepoints = integer(),
+                          stringsAsFactors = FALSE),
+              file = file.path(out_dir, "cross", "cross_temporal_persistence.tsv"),
+              sep = "\t", row.names = FALSE, quote = FALSE)
+  write.table(data.frame(gene_id = character(), gene_symbol = character(),
+                          pair = character(), category = character(),
+                          stringsAsFactors = FALSE),
+              file = file.path(out_dir, "cross", "cross_temporal_gene_activity.tsv"),
+              sep = "\t", row.names = FALSE, quote = FALSE)
+  write.table(data.frame(pair = character(), timepoint = character(),
+                          n_up = integer(), n_down = integer(),
+                          n_total = integer(), mean_abs_log2FC = numeric(),
+                          stringsAsFactors = FALSE),
+              file = file.path(out_dir, "cross", "cross_temporal_velocity.tsv"),
+              sep = "\t", row.names = FALSE, quote = FALSE)
+  write.table(data.frame(pair = character(), timepoint = character(),
+                          gene_id = character(), stringsAsFactors = FALSE),
+              file = file.path(out_dir, "cross", "cross_temporal_venn_genelists.tsv"),
+              sep = "\t", row.names = FALSE, quote = FALSE)
+}
+
 cat("\n=== Analysis Complete ===\n")
 cat(sprintf("All outputs in: %s/\n", out_dir))
