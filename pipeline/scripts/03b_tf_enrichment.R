@@ -634,6 +634,7 @@ if (nrow(sig_net) > 0 && n_sig_tfs >= 1) {
       scale_fill_manual(
         values = c(direction_colors, "TF" = tf_fill),
         breaks = c("Up", "Down", "Mixed", "TF"),
+        drop = FALSE,
         na.value = "grey50",
         guide = guide_legend(title = "Direction", override.aes = list(size = 4))) +
       scale_shape_manual(
@@ -645,7 +646,7 @@ if (nrow(sig_net) > 0 && n_sig_tfs >= 1) {
       labs(title = paste0("TF → Target Gene Network: ", net_name),
            subtitle = paste0(length(tf_nodes), " enriched TFs, ", length(gene_nodes),
                              " target genes, ", nrow(edges_df), " edges, ", n_comm, " modules"),
-            caption = "Red=up, Blue=down · ▲=transient, ■=deferred, ◆=sustained, ◆=divergent · Size=|log2FC|") +
+            caption = "Fill=Direction · Shape=Persistence (see legend) · Size=|log2FC|") +
       theme_graph(base_family = "sans") + theme(legend.position = "bottom")
 
     tag <- tolower(net_name)
@@ -673,7 +674,7 @@ if (nrow(sig_net) > 0 && n_sig_tfs >= 1) {
               ifelse(V(g)$persistence == "Sustained", "diamond",
               ifelse(V(g)$persistence == "Divergent", "star", "dot"))))),
       size = ifelse(V(g)$type == "TF", V(g)$node_size * 3,
-                    pmin(pmax(abs(V(g)$log2FC), 0.5, na.rm = TRUE), 2) * 4),
+                    pmin(pmax(abs(V(g)$log2FC), 1, na.rm = TRUE), 2) * 8),
       stringsAsFactors = FALSE
     )
 
@@ -693,7 +694,9 @@ if (nrow(sig_net) > 0 && n_sig_tfs >= 1) {
       visGroups(groupname = "Mixed", color = list(background = "grey70", border = "grey40")) %>%
       visOptions(highlightNearest = list(enabled = TRUE, degree = 1, hover = TRUE),
                  nodesIdSelection = TRUE) %>%
-      visEdges(arrows = "to", smooth = FALSE, scaling = list(min = 1, max = 5)) %>%
+      visEdges(arrows = "to", smooth = FALSE,
+               color = list(color = "#C0C0C0", highlight = "#666666"),
+               scaling = list(min = 0.3, max = 2)) %>%
       visPhysics(solver = "barnesHut",
                  barnesHut = list(gravitationalConstant = -1200, centralGravity = 0.1,
                                   springLength = 250, springConstant = 0.02),
