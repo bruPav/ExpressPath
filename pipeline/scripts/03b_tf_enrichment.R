@@ -623,12 +623,12 @@ if (nrow(sig_net) > 0 && n_sig_tfs >= 1) {
       scale_edge_width(range = c(0.15, 1.2), guide = "none") +
       scale_edge_alpha(range = c(0.15, 0.6), guide = "none") +
       geom_node_point(data = function(x) x[x$type == "Gene", ],
-        aes(fill = direction, shape = persistence, size = pmin(pmax(abs(log2FC), 0.5, na.rm = TRUE), 4, na.rm = TRUE),
+        aes(fill = direction, shape = persistence, size = pmin(pmax(abs(log2FC), 0.5, na.rm = TRUE), 2, na.rm = TRUE),
             stroke = ifelse(is_DEG, 1.2, 0.3)), color = "grey40") +
       geom_node_point(data = function(x) x[x$type == "TF", ],
         aes(fill = "TF", size = node_size, stroke = ifelse(is_DEG, 1.5, 0.3)),
         shape = 21, color = "black") +
-      geom_node_text(aes(label = name, filter = (type == "TF" | degree >= 2 | (!is.na(log2FC) & abs(log2FC) >= 2))),
+      geom_node_text(aes(label = name, filter = (type == "TF" | degree >= 2 | (!is.na(log2FC) & abs(log2FC) >= 1))),
         size = 2.2, repel = TRUE, max.overlaps = 100,
         box.padding = 0.15, point.padding = 0.15, segment.color = "grey70") +
       scale_fill_manual(
@@ -638,7 +638,8 @@ if (nrow(sig_net) > 0 && n_sig_tfs >= 1) {
         guide = guide_legend(title = "Direction", override.aes = list(size = 4))) +
       scale_shape_manual(
         values = c("Transient" = 21, "Sustained" = 24, "Secondary_Deferred" = 22,
-                   "Divergent" = 18, "Unknown" = 1),
+                   "Partially_Sustained" = 25, "Transient_Mid" = 23, "Complex" = 18,
+                   "Divergent" = 8, "Unknown" = 1),
         guide = guide_legend(title = "Persistence", override.aes = list(fill = "grey50"))) +
       scale_size_continuous(range = c(1, 8), guide = "none") +
       labs(title = paste0("TF → Target Gene Network: ", net_name),
@@ -672,7 +673,7 @@ if (nrow(sig_net) > 0 && n_sig_tfs >= 1) {
               ifelse(V(g)$persistence == "Sustained", "diamond",
               ifelse(V(g)$persistence == "Divergent", "star", "dot"))))),
       size = ifelse(V(g)$type == "TF", V(g)$node_size * 3,
-                    pmin(pmax(abs(V(g)$log2FC), 0.5, na.rm = TRUE), 4) * 4),
+                    pmin(pmax(abs(V(g)$log2FC), 0.5, na.rm = TRUE), 2) * 4),
       stringsAsFactors = FALSE
     )
 
@@ -694,8 +695,8 @@ if (nrow(sig_net) > 0 && n_sig_tfs >= 1) {
                  nodesIdSelection = TRUE) %>%
       visEdges(arrows = "to", smooth = FALSE, scaling = list(min = 1, max = 5)) %>%
       visPhysics(solver = "barnesHut",
-                 barnesHut = list(gravitationalConstant = -3000, centralGravity = 0.3,
-                                  springLength = 150, springConstant = 0.04),
+                 barnesHut = list(gravitationalConstant = -1200, centralGravity = 0.1,
+                                  springLength = 250, springConstant = 0.02),
                  stabilization = list(iterations = 300, fit = TRUE)) %>%
       visInteraction(navigationButtons = TRUE, dragNodes = TRUE) %>%
       visLayout(randomSeed = 42) %>%

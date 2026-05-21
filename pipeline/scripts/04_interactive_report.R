@@ -758,7 +758,7 @@ has_temporal <- nrow(cluster_prof) > 0 || nrow(velocity) > 0 || nrow(persist) > 
 # --- Clustering Plotly data ---
 cluster_plotly <- "[]"
 cluster_tbl_rows <- ""
-cluster_select_opts <- ""
+cluster_select_opts <- '<option value="all" selected>All cell lines</option>'
 if (nrow(cluster_prof) > 0) {
   tp_cols <- setdiff(names(cluster_prof), c("cell_line", "cluster", "n_genes"))
   traces <- list()
@@ -780,8 +780,7 @@ if (nrow(cluster_prof) > 0) {
       )
     }
     cluster_select_opts <- paste0(cluster_select_opts,
-      sprintf('<option value="%s"%s>%s</option>', cl,
-              if (which(unique(cluster_prof$cell_line) == cl) == 1) " selected" else "", cl))
+      sprintf('<option value="%s">%s</option>', cl, cl))
   }
   cluster_plotly <- jsonlite::toJSON(traces, auto_unbox = TRUE, force = TRUE)
 
@@ -801,12 +800,23 @@ velocity_bar_json <- "{}"
 velocity_box_json <- "{}"
 velocity_tbl_html <- ""
 if (nrow(velocity) > 0) {
-  velocity_bar_json <- jsonlite::toJSON(
-    list(list(x = velocity$timepoint, y = velocity$n_up, type = "bar",
-              name = "Up-regulated", marker = list(color = "#E41A1C")),
-         list(x = velocity$timepoint, y = velocity$n_down, type = "bar",
-              name = "Down-regulated", marker = list(color = "#377EB8"))),
-    auto_unbox = TRUE, force = TRUE)
+  vel_traces <- list()
+  cl_list <- unique(velocity$cell_line)
+  up_colors <- c("#E41A1C", "#FF7F00", "#984EA3", "#A65628", "#F781BF", "#999999")
+  dn_colors <- c("#377EB8", "#4DAF4A", "#66A61E", "#E6AB02", "#A6761D", "#666666")
+  for (i in seq_along(cl_list)) {
+    cl <- cl_list[i]
+    cl_data <- velocity[velocity$cell_line == cl, ]
+    up_c <- up_colors[((i - 1) %% length(up_colors)) + 1]
+    dn_c <- dn_colors[((i - 1) %% length(dn_colors)) + 1]
+    vel_traces[[length(vel_traces) + 1]] <- list(
+      x = cl_data$timepoint, y = cl_data$n_up, type = "bar",
+      name = paste0(cl, " Up"), marker = list(color = up_c))
+    vel_traces[[length(vel_traces) + 1]] <- list(
+      x = cl_data$timepoint, y = cl_data$n_down, type = "bar",
+      name = paste0(cl, " Down"), marker = list(color = dn_c))
+  }
+  velocity_bar_json <- jsonlite::toJSON(vel_traces, auto_unbox = TRUE, force = TRUE)
 
   for (i in seq_len(nrow(velocity))) {
     row <- velocity[i, ]
@@ -1210,17 +1220,31 @@ document.getElementById("gseaDotplot").on("plotly_click", function(data) {
 $(document).ready(function() {
   var clusterRendered = false, velocityRendered = false;
 
-  function renderCluster() {
-    if (clusterRendered) return;
-    clusterRendered = true;
+  function renderCluster(filterCL) {
+    if (!filterCL) filterCL = "all";
     var allClusterData = %s;
     var clusterLayout = {
       title: "", xaxis: { title: "Time Point" }, yaxis: { title: "Mean VST Expression" },
       height: 450, margin: { l: 60, r: 20, t: 30, b: 50 },
       legend: { font: { size: 10 }, orientation: "h", y: 1.15 }
     };
-    Plotly.newPlot("clusterPlotly", allClusterData, clusterLayout);
+    var filtered = [];
+    for (var i = 0; i < allClusterData.length; i++) {
+      if (filterCL === "all" || allClusterData[i].name.indexOf(filterCL) === 0) {
+        filtered.push(allClusterData[i]);
+      }
+    }
+    if (clusterRendered) {
+      Plotly.react("clusterPlotly", filtered, clusterLayout);
+    } else {
+      clusterRendered = true;
+      Plotly.newPlot("clusterPlotly", filtered, clusterLayout);
+    }
   }
+
+  $("#clusterCL").on("change", function() {
+    renderCluster($(this).val());
+  });
 
   function renderVelocity() {
     if (velocityRendered) return;
@@ -1229,14 +1253,15 @@ $(document).ready(function() {
     var velLayout = {
       barmode: "group",
       title: "", xaxis: { title: "Time Point" }, yaxis: { title: "Number of DEGs" },
-      height: 400, margin: { l: 60, r: 20, t: 30, b: 50 }
+      height: 400, margin: { l: 60, r: 20, t: 30, b: 50 },
+      legend: { font: { size: 10 }, orientation: "h", y: 1.15 }
     };
     Plotly.newPlot("velocityBar", velocityData, velLayout);
   }
 
   // Render on tab activation for correct sizing
   document.getElementById("tab-temporal").addEventListener("shown.bs.tab", function(e) {
-    renderCluster();
+    renderCluster($("#clusterCL").val() || "all");
     var innerTab = document.querySelector("#temporal .nav-link.active");
     if (innerTab && innerTab.id) {
       if (innerTab.getAttribute("data-bs-target") === "#temp-velocity") renderVelocity();
@@ -1245,7 +1270,7 @@ $(document).ready(function() {
 
   document.querySelectorAll("#temporal .nav-link").forEach(function(link) {
     link.addEventListener("shown.bs.tab", function(e) {
-      if (e.target.getAttribute("data-bs-target") === "#temp-clusters") renderCluster();
+      if (e.target.getAttribute("data-bs-target") === "#temp-clusters") renderCluster($("#clusterCL").val() || "all");
       if (e.target.getAttribute("data-bs-target") === "#temp-velocity") renderVelocity();
     });
   });
