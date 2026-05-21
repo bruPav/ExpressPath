@@ -67,10 +67,10 @@ persist       <- tryRead(file.path(results_dir, "temporal", "persistence_classes
 gene_activity <- tryRead(file.path(results_dir, "temporal", "gene_activity.tsv"))
 
 # Cross-temporal analysis (Step G)
-cross_tpersist <- tryRead(file.path(results_dir, "cross", "cross_temporal_persistence.tsv"))
-cross_tvel      <- tryRead(file.path(results_dir, "cross", "cross_temporal_velocity.tsv"))
-cross_tga       <- tryRead(file.path(results_dir, "cross", "cross_temporal_gene_activity.tsv"))
-cross_tvenn     <- tryRead(file.path(results_dir, "cross", "cross_temporal_venn_genelists.tsv"))
+cross_tpersist <- tryRead(file.path(results_dir, "cross_temporal", "cross_temporal_persistence.tsv"))
+cross_tvel      <- tryRead(file.path(results_dir, "cross_temporal", "cross_temporal_velocity.tsv"))
+cross_tga       <- tryRead(file.path(results_dir, "cross_temporal", "cross_temporal_gene_activity.tsv"))
+cross_tvenn     <- tryRead(file.path(results_dir, "cross_temporal", "cross_temporal_venn_genelists.tsv"))
 
 # Map ENSG -> ENTREZ
 ensg_ids <- combined$gene_id
@@ -1027,12 +1027,12 @@ if (has_cross_temporal) {
   for (pr in unique(c(cross_tvel$pair, cross_tga$pair))) {
     tag <- gsub("_vs_", "v", pr)
     # Venn
-    venn_path <- file.path(results_dir, "cross", paste0("cross_temporal_venn_", tag, ".png"))
+    venn_path <- file.path(results_dir, "cross_temporal", paste0("cross_temporal_venn_", tag, ".png"))
     if (file.exists(venn_path)) {
       ct_venn_imgs[[pr]] <- base64encode(readBin(venn_path, "raw", file.info(venn_path)$size))
     }
     # Heatmap
-    heat_path <- file.path(results_dir, "cross", paste0("cross_temporal_activity_heatmap_", tag, ".png"))
+    heat_path <- file.path(results_dir, "cross_temporal", paste0("cross_temporal_activity_heatmap_", tag, ".png"))
     if (file.exists(heat_path)) {
       ct_heat_imgs[[pr]] <- base64encode(readBin(heat_path, "raw", file.info(heat_path)$size))
     }

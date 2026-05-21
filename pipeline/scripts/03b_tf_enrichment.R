@@ -43,7 +43,7 @@ min_genes <- 5       # minimum valid symbols per gene set
 top_n_tfs <- 5       # top TFs per gene set for dotplot
 
 # --- 1. Load data ---
-cross_shared <- read.table(file.path(out_dir, "cross", "cross_cellline_shared.tsv"),
+cross_shared <- read.table(file.path(out_dir, "cross_cellline", "cross_cellline_shared.tsv"),
                            header = TRUE, sep = "\t", stringsAsFactors = FALSE)
 persist_df <- read.table(file.path(out_dir, "temporal", "persistence_classes.tsv"),
                          header = TRUE, sep = "\t", stringsAsFactors = FALSE)
@@ -52,7 +52,7 @@ annot <- read.table(file.path(out_dir, "tables", "gene_annotations.tsv"),
                     quote = "", fill = TRUE, comment.char = "")
 
 # Cross-temporal persistence (Step G)
-cross_tpersist_file <- file.path(out_dir, "cross", "cross_temporal_persistence.tsv")
+cross_tpersist_file <- file.path(out_dir, "cross_temporal", "cross_temporal_persistence.tsv")
 if (file.exists(cross_tpersist_file)) {
   cross_tpersist <- read.table(cross_tpersist_file,
                                 header = TRUE, sep = "\t", stringsAsFactors = FALSE)
@@ -126,7 +126,7 @@ if (nrow(cross_tpersist) > 0) {
   }
 
   # Divergence up/down: emergent genes with known direction
-  cross_ga_file <- file.path(out_dir, "cross", "cross_temporal_gene_activity.tsv")
+  cross_ga_file <- file.path(out_dir, "cross_temporal", "cross_temporal_gene_activity.tsv")
   if (file.exists(cross_ga_file)) {
     cross_ga <- read.table(cross_ga_file,
                            header = TRUE, sep = "\t", stringsAsFactors = FALSE)
@@ -151,6 +151,37 @@ if (nrow(cross_tpersist) > 0) {
           if (length(down_genes) > 0) {
             gene_sets[[paste0(dset, "_Down")]] <- down_genes
           }
+        }
+      }
+    }
+  }
+
+  # 3e. Per-timepoint divergence gene sets (Divmock, Div1h, Div3h)
+  if (file.exists(cross_ga_file) && nrow(cross_ga) > 0) {
+    cross_ga <- read.table(cross_ga_file,
+                           header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+    sig_cols <- grep("^sig_", names(cross_ga), value = TRUE)
+    for (sc in sig_cols) {
+      tp_name <- sub("^sig_", "", sc)
+      lfc_col <- paste0("log2FC_", tp_name)
+      is_sig <- isTRUE(cross_ga[[sc]]) | cross_ga[[sc]] == TRUE
+      if (!all(is.na(is_sig))) is_sig[is.na(is_sig)] <- FALSE
+      if (sum(is_sig) == 0) next
+
+      # Short tag for clean gene set names
+      tag <- gsub("^mock$", "mock", tp_name)
+      tag <- gsub("h$", "h", tag)
+      gene_sets[[paste0("Div", tag)]] <- cross_ga$gene_id[is_sig]
+
+      # Directional splits
+      if (lfc_col %in% names(cross_ga)) {
+        up_genes <- cross_ga$gene_id[is_sig & cross_ga[[lfc_col]] > 0 & !is.na(cross_ga[[lfc_col]])]
+        down_genes <- cross_ga$gene_id[is_sig & cross_ga[[lfc_col]] < 0 & !is.na(cross_ga[[lfc_col]])]
+        if (length(up_genes) > 0) {
+          gene_sets[[paste0("Div", tag, "_Up")]] <- up_genes
+        }
+        if (length(down_genes) > 0) {
+          gene_sets[[paste0("Div", tag, "_Down")]] <- down_genes
         }
       }
     }

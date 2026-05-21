@@ -56,14 +56,15 @@ enrichr_dbs       = config.get("enrichr_databases", [
 enrichr_dbs_str   = ",".join(enrichr_dbs)
 
 # --- Paths ---
-out_dir     = f"../results/{run_id}"
-tables_dir  = f"{out_dir}/tables"
-qc_dir      = f"{out_dir}/qc"
-deg_dir     = f"{out_dir}/deg"
-temporal_dir = f"{out_dir}/temporal"
-cross_dir   = f"{out_dir}/cross"
-tf_dir      = f"{out_dir}/tf"
-pathway_dir = f"{out_dir}/pathway"
+out_dir            = f"../results/{run_id}"
+tables_dir         = f"{out_dir}/tables"
+qc_dir             = f"{out_dir}/qc"
+deg_dir            = f"{out_dir}/deg"
+temporal_dir       = f"{out_dir}/temporal"
+cross_cellline_dir = f"{out_dir}/cross_cellline"
+cross_temporal_dir = f"{out_dir}/cross_temporal"
+tf_dir             = f"{out_dir}/tf"
+pathway_dir        = f"{out_dir}/pathway"
 
 # Core tables
 counts_file    = f"{tables_dir}/counts_matrix.tsv"
@@ -82,16 +83,18 @@ venn_file      = f"{temporal_dir}/venn_genelists.tsv"
 persist_file   = f"{temporal_dir}/persistence_classes.tsv"
 gene_act_file  = f"{temporal_dir}/gene_activity.tsv"
 
-# Cross-cell-line
-cross_shared_file     = f"{cross_dir}/cross_cellline_shared.tsv"
-cross_specific_file   = f"{cross_dir}/cross_cellline_specific.tsv"
-cross_persist_file    = f"{cross_dir}/cross_persistence.tsv"
+# Cross-cell-line comparison (Step F): across cell lines within each timepoint
+cross_shared_file   = f"{cross_cellline_dir}/cross_cellline_shared.tsv"
+cross_specific_file = f"{cross_cellline_dir}/cross_cellline_specific.tsv"
+cross_persist_file  = f"{cross_cellline_dir}/cross_persistence.tsv"
 
-# Cross-cell-line temporal analysis (Step G)
-cross_tpersist_file   = f"{cross_dir}/cross_temporal_persistence.tsv"
-cross_tga_file        = f"{cross_dir}/cross_temporal_gene_activity.tsv"
-cross_tvel_file       = f"{cross_dir}/cross_temporal_velocity.tsv"
-cross_tvenn_file      = f"{cross_dir}/cross_temporal_venn_genelists.tsv"
+# Cross-temporal analysis (Step G): between-cell-line differences over time
+cross_tpersist_file   = f"{cross_temporal_dir}/cross_temporal_persistence.tsv"
+cross_tga_file        = f"{cross_temporal_dir}/cross_temporal_gene_activity.tsv"
+cross_tvel_file       = f"{cross_temporal_dir}/cross_temporal_velocity.tsv"
+cross_tvenn_file      = f"{cross_temporal_dir}/cross_temporal_venn_genelists.tsv"
+cross_tshared_file    = f"{cross_temporal_dir}/cross_temporal_shared.tsv"
+cross_tspecific_file  = f"{cross_temporal_dir}/cross_temporal_specific.tsv"
 
 # TF enrichment
 tf_results_file  = f"{tf_dir}/tf_enrichment_results.tsv"
@@ -154,7 +157,9 @@ rule deseq2_analysis:
         cross_tpersist = cross_tpersist_file,
         cross_tga     = cross_tga_file,
         cross_tvel    = cross_tvel_file,
-        cross_tvenn   = cross_tvenn_file
+        cross_tvenn   = cross_tvenn_file,
+        cross_tshared  = cross_tshared_file,
+        cross_tspecific = cross_tspecific_file
     params:
         pvalue = pvalue_val,
         design = design_json,
@@ -223,6 +228,8 @@ rule interactive_report:
         cross_tvel     = cross_tvel_file,
         cross_tga      = cross_tga_file,
         cross_tvenn    = cross_tvenn_file,
+        cross_tshared  = cross_tshared_file,
+        cross_tspecific = cross_tspecific_file,
         tf_results     = tf_results_file
     output:
         report = report_file
