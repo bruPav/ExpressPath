@@ -381,7 +381,9 @@ if (nrow(sig_tfs) > 0) {
     slice_min(adj_pvalue, n = 1, with_ties = FALSE) %>%
     ungroup()
 
-  # Preserve full dataset for focused heatmaps
+  # Clean TF names and preserve full dataset before top-50 capping
+  sig_best$TF_clean <- gsub(" [Hh]omo [Ss]apiens", "", sig_best$TF)
+  sig_best$TF_clean <- gsub("_HUMAN$", "", sig_best$TF_clean)
   sig_best_full <- sig_best
 
   # Cap at top 50 TFs by minimum adj_pvalue
@@ -395,10 +397,6 @@ if (nrow(sig_tfs) > 0) {
   }
   sig_best <- sig_best[sig_best$TF %in% top_tfs, ]
   sig_best$TF <- factor(sig_best$TF, levels = rev(top_tfs))
-
-  # Clean TF names
-  sig_best$TF_clean <- gsub(" [Hh]omo [Ss]apiens", "", sig_best$TF)
-  sig_best$TF_clean <- gsub("_HUMAN$", "", sig_best$TF_clean)
 
   # Build matrix: rows = TFs, cols = gene_sets, value = -log10(adj_pvalue)
   gs_levels <- sort(unique(sig_best$gene_set))
@@ -556,12 +554,18 @@ if (nrow(sig_tfs) > 0) {
 
   # --- 8c. Focused heatmaps per analysis dimension ---
   build_focused_heatmap <- function(subset_type, subdir, title, sig_data = sig_best_full) {
-    gs_allowed <- names(gs_type)[gs_type %in% subset_type]
+    all_gs <- unique(sig_data$gene_set)
+    gs_allowed <- all_gs[vapply(all_gs, function(gs) {
+      if (grepl("^Shared_", gs)) "Shared" %in% subset_type
+      else if (grepl("^Cross_", gs)) "Cross" %in% subset_type
+      else if (grepl("^Div", gs)) "Divergence" %in% subset_type
+      else "Per_CellLine" %in% subset_type
+    }, logical(1))]
     if (length(gs_allowed) == 0) return(FALSE)
     sb <- sig_data[sig_data$gene_set %in% gs_allowed, ]
     if (nrow(sb) == 0) return(FALSE)
 
-    sb$gene_set <- factor(sb$gene_set, levels = intersect(gs_levels, unique(sb$gene_set)))
+    sb$gene_set <- factor(sb$gene_set, levels = sort(unique(as.character(sb$gene_set))))
     tf_focus <- sb %>%
       group_by(TF) %>%
       summarise(min_padj = min(adj_pvalue), .groups = "drop") %>%
@@ -633,9 +637,9 @@ if (nrow(sig_tfs) > 0) {
   }
 
   build_focused_heatmap(c("Shared", "Per_CellLine", "Cross"),
-    "cross_cellline", "TF Enrichment: Cross-Cell-Line Gene Sets")
-  build_focused_heatmap(c("Divergence"),
     "cross_temporal", "TF Enrichment: Cross-Temporal Gene Sets")
+  build_focused_heatmap(c("Divergence"),
+    "cross_cellline", "TF Enrichment: Cross-Cell-Line Gene Sets")
 } else {
   cat("No TFs with library-level adj.p < 0.05; skipping heatmap.\n")
 }
@@ -832,7 +836,7 @@ if (nrow(sig_net) > 0 && n_sig_tfs >= 1) {
     tag <- tolower(net_name)
 
     # Route: cell-line + shared → cross_cellline/; divergence → cross_temporal/
-    net_subdir <- if (grepl("^div", tag)) "cross_temporal" else "cross_cellline"
+    net_subdir <- if (grepl("^div", tag)) "cross_cellline" else "cross_temporal"
 
     ggsave(file.path(out_dir, "tf", net_subdir, paste0("tf_regulatory_network_", tag, ".pdf")),
            p_net, width = 16, height = 14)
