@@ -60,9 +60,8 @@ out_dir            = f"../results/{run_id}"
 tables_dir         = f"{out_dir}/tables"
 qc_dir             = f"{out_dir}/qc"
 deg_dir            = f"{out_dir}/deg"
-temporal_dir       = f"{out_dir}/temporal"
-cross_cellline_dir = f"{out_dir}/cross_cellline"
-cross_temporal_dir = f"{out_dir}/cross_temporal"
+cross_temporal_dir = f"{out_dir}/cross_temporal"     # treatment response (cl_tp_vs_mock)
+cross_cellline_dir = f"{out_dir}/cross_cellline"     # between-cell-line (E6_vs_A549_*)
 tf_dir             = f"{out_dir}/tf"
 pathway_dir        = f"{out_dir}/pathway"
 
@@ -75,26 +74,28 @@ signif_file    = f"{tables_dir}/signif_lrt.tsv"
 signif_fc_file = f"{tables_dir}/signif_lrt_foldchange1.tsv"
 vst_file       = f"{tables_dir}/vst_normalized_counts.tsv"
 
-# Temporal analysis
-cluster_file   = f"{temporal_dir}/cluster_assignments.tsv"
-cluster_prof   = f"{temporal_dir}/cluster_mean_profiles.tsv"
-velocity_file  = f"{temporal_dir}/velocity_summary.tsv"
-venn_file      = f"{temporal_dir}/venn_genelists.tsv"
-persist_file   = f"{temporal_dir}/persistence_classes.tsv"
-gene_act_file  = f"{temporal_dir}/gene_activity.tsv"
+# ── cross_temporal/ : treatment response ──
+# Within-cell-line temporal (Mfuzz, persistence, velocity, Venn)
+ct_cluster_file   = f"{cross_temporal_dir}/cluster_assignments.tsv"
+ct_cluster_prof   = f"{cross_temporal_dir}/cluster_mean_profiles.tsv"
+ct_velocity_file  = f"{cross_temporal_dir}/velocity_summary.tsv"
+ct_venn_file      = f"{cross_temporal_dir}/venn_genelists.tsv"
+ct_persist_file   = f"{cross_temporal_dir}/persistence_classes.tsv"
+ct_gene_act_file  = f"{cross_temporal_dir}/gene_activity.tsv"
 
-# Cross-cell-line comparison (Step F): across cell lines within each timepoint
-cross_shared_file   = f"{cross_cellline_dir}/cross_cellline_shared.tsv"
-cross_specific_file = f"{cross_cellline_dir}/cross_cellline_specific.tsv"
-cross_persist_file  = f"{cross_cellline_dir}/cross_persistence.tsv"
+# Treatment-response cross-cell-line (Step F: shared/specific, concordance, scatter)
+ct_shared_file    = f"{cross_temporal_dir}/cross_cellline_shared.tsv"
+ct_specific_file  = f"{cross_temporal_dir}/cross_cellline_specific.tsv"
+ct_cross_persist  = f"{cross_temporal_dir}/cross_persistence.tsv"
 
-# Cross-temporal analysis (Step G): between-cell-line differences over time
-cross_tpersist_file   = f"{cross_temporal_dir}/cross_temporal_persistence.tsv"
-cross_tga_file        = f"{cross_temporal_dir}/cross_temporal_gene_activity.tsv"
-cross_tvel_file       = f"{cross_temporal_dir}/cross_temporal_velocity.tsv"
-cross_tvenn_file      = f"{cross_temporal_dir}/cross_temporal_venn_genelists.tsv"
-cross_tshared_file    = f"{cross_temporal_dir}/cross_temporal_shared.tsv"
-cross_tspecific_file  = f"{cross_temporal_dir}/cross_temporal_specific.tsv"
+# ── cross_cellline/ : between-cell-line divergence ──
+# Between-cell-line temporal (Step G: persistence, gene activity, velocity, Venn)
+cc_persist_file   = f"{cross_cellline_dir}/cross_temporal_persistence.tsv"
+cc_ga_file        = f"{cross_cellline_dir}/cross_temporal_gene_activity.tsv"
+cc_vel_file       = f"{cross_cellline_dir}/cross_temporal_velocity.tsv"
+cc_venn_file      = f"{cross_cellline_dir}/cross_temporal_venn_genelists.tsv"
+cc_shared_file    = f"{cross_cellline_dir}/cross_temporal_shared.tsv"
+cc_specific_file  = f"{cross_cellline_dir}/cross_temporal_specific.tsv"
 
 # TF enrichment
 tf_results_file  = f"{tf_dir}/tf_enrichment_results.tsv"
@@ -141,25 +142,25 @@ rule deseq2_analysis:
         meta   = metadata_file,
         annot  = annot_file
     output:
-        combined      = combined_file,
-        signif        = signif_file,
-        signif_fc     = signif_fc_file,
-        vst           = vst_file,
-        cluster       = cluster_file,
-        cluster_p     = cluster_prof,
-        velocity      = velocity_file,
-        venn          = venn_file,
-        persist       = persist_file,
-        gene_act      = gene_act_file,
-        cross_shared  = cross_shared_file,
-        cross_specific = cross_specific_file,
-        cross_persist = cross_persist_file,
-        cross_tpersist = cross_tpersist_file,
-        cross_tga     = cross_tga_file,
-        cross_tvel    = cross_tvel_file,
-        cross_tvenn   = cross_tvenn_file,
-        cross_tshared  = cross_tshared_file,
-        cross_tspecific = cross_tspecific_file
+        combined       = combined_file,
+        signif         = signif_file,
+        signif_fc      = signif_fc_file,
+        vst            = vst_file,
+        cluster        = ct_cluster_file,
+        cluster_p      = ct_cluster_prof,
+        velocity       = ct_velocity_file,
+        venn           = ct_venn_file,
+        persist        = ct_persist_file,
+        gene_act       = ct_gene_act_file,
+        ct_shared      = ct_shared_file,
+        ct_specific    = ct_specific_file,
+        ct_cross_persist = ct_cross_persist,
+        cc_persist     = cc_persist_file,
+        cc_ga          = cc_ga_file,
+        cc_vel         = cc_vel_file,
+        cc_venn        = cc_venn_file,
+        cc_shared      = cc_shared_file,
+        cc_specific    = cc_specific_file
     params:
         pvalue = pvalue_val,
         design = design_json,
@@ -195,10 +196,10 @@ rule pathway_analysis:
 # --- Step 3b: TF target enrichment (enrichR) ---
 rule tf_enrichment:
     input:
-        cross_shared  = cross_shared_file,
-        persist       = persist_file,
-        cross_tpersist = cross_tpersist_file,
-        annot         = annot_file
+        ct_shared    = ct_shared_file,
+        persist      = ct_persist_file,
+        cc_persist   = cc_persist_file,
+        annot        = annot_file
     output:
         results  = tf_results_file,
         heat_pdf = tf_heatmap_pdf,
@@ -217,19 +218,19 @@ rule interactive_report:
         combined       = combined_file,
         gsea_kegg      = gsea_kegg_file,
         gsea_go        = gsea_go_file,
-        cluster        = cluster_file,
-        cluster_p      = cluster_prof,
-        velocity       = velocity_file,
-        venn           = venn_file,
-        persist        = persist_file,
-        gene_act       = gene_act_file,
-        cross_shared   = cross_shared_file,
-        cross_tpersist = cross_tpersist_file,
-        cross_tvel     = cross_tvel_file,
-        cross_tga      = cross_tga_file,
-        cross_tvenn    = cross_tvenn_file,
-        cross_tshared  = cross_tshared_file,
-        cross_tspecific = cross_tspecific_file,
+        cluster        = ct_cluster_file,
+        cluster_p      = ct_cluster_prof,
+        velocity       = ct_velocity_file,
+        venn           = ct_venn_file,
+        persist        = ct_persist_file,
+        gene_act       = ct_gene_act_file,
+        ct_shared      = ct_shared_file,
+        cc_persist     = cc_persist_file,
+        cc_vel         = cc_vel_file,
+        cc_ga          = cc_ga_file,
+        cc_venn        = cc_venn_file,
+        cc_shared      = cc_shared_file,
+        cc_specific    = cc_specific_file,
         tf_results     = tf_results_file
     output:
         report = report_file

@@ -43,7 +43,7 @@ cat("=== DESeq2 Analysis ===\n")
 cat(sprintf("Output dir: %s\n", out_dir))
 
 # Create output subdirectories
-for (subdir in c("tables", "qc", "deg", "temporal", "cross_cellline", "cross_temporal")) {
+for (subdir in c("tables", "qc", "deg", "cross_temporal", "cross_cellline")) {
   dir.create(file.path(out_dir, subdir), showWarnings = FALSE, recursive = TRUE)
 }
 
@@ -592,7 +592,7 @@ if (length(lrt_signif_genes) >= 10) {
       cluster_profiles_list[[length(cluster_profiles_list) + 1]] <- row
     }
 
-    pdf(file.path(out_dir, "temporal", paste0("cluster_profiles_", cl, ".pdf")), width = 10, height = 8)
+    pdf(file.path(out_dir, "cross_temporal", paste0("cluster_profiles_", cl, ".pdf")), width = 10, height = 8)
     mfuzz.plot2(tmp_s, cl = cl_result, mfrow = c(ceiling(n_clust / 3), min(3, n_clust)),
                 time.labels = colnames(tp_matrix),
                 xlab = "Time point", ylab = "Expression")
@@ -603,7 +603,7 @@ if (length(lrt_signif_genes) >= 10) {
   cluster_assign_all <- do.call(rbind, cluster_assignments_list)
   if (!is.null(cluster_assign_all) && nrow(cluster_assign_all) > 0) {
     write.table(cluster_assign_all,
-                file = file.path(out_dir, "temporal", "cluster_assignments.tsv"),
+                file = file.path(out_dir, "cross_temporal", "cluster_assignments.tsv"),
                 sep = "\t", row.names = FALSE, quote = FALSE)
     cat(sprintf("Wrote cluster_assignments.tsv (%d genes)\n", nrow(cluster_assign_all)))
   }
@@ -611,7 +611,7 @@ if (length(lrt_signif_genes) >= 10) {
   cluster_prof_all <- do.call(rbind, cluster_profiles_list)
   if (!is.null(cluster_prof_all) && nrow(cluster_prof_all) > 0) {
     write.table(cluster_prof_all,
-                file = file.path(out_dir, "temporal", "cluster_mean_profiles.tsv"),
+                file = file.path(out_dir, "cross_temporal", "cluster_mean_profiles.tsv"),
                 sep = "\t", row.names = FALSE, quote = FALSE)
     cat(sprintf("Wrote cluster_mean_profiles.tsv (%d profiles)\n", nrow(cluster_prof_all)))
   }
@@ -620,11 +620,11 @@ if (length(lrt_signif_genes) >= 10) {
   write.table(data.frame(gene_id = character(), cell_line = character(),
                          cluster = character(), membership_score = numeric(),
                          stringsAsFactors = FALSE),
-              file = file.path(out_dir, "temporal", "cluster_assignments.tsv"),
+              file = file.path(out_dir, "cross_temporal", "cluster_assignments.tsv"),
               sep = "\t", row.names = FALSE, quote = FALSE)
   write.table(data.frame(cell_line = character(), cluster = character(),
                          n_genes = integer(), stringsAsFactors = FALSE),
-              file = file.path(out_dir, "temporal", "cluster_mean_profiles.tsv"),
+              file = file.path(out_dir, "cross_temporal", "cluster_mean_profiles.tsv"),
               sep = "\t", row.names = FALSE, quote = FALSE)
 }
 
@@ -660,7 +660,7 @@ for (cl in cl_ids) {
 
 velocity_summary <- do.call(rbind, velocity_rows)
 write.table(velocity_summary,
-            file = file.path(out_dir, "temporal", "velocity_summary.tsv"),
+            file = file.path(out_dir, "cross_temporal", "velocity_summary.tsv"),
             sep = "\t", row.names = FALSE, quote = FALSE)
 cat(sprintf("Wrote velocity_summary.tsv\n"))
 
@@ -672,7 +672,7 @@ if (nrow(velocity_summary) > 0) {
          title = "Response Velocity: DEGs per Time Point",
          fill = "Cell Line") +
     theme_minimal(base_size = 14)
-  ggsave(file.path(out_dir, "temporal", "velocity_barplot.pdf"), p_vel, width = 8, height = 5)
+  ggsave(file.path(out_dir, "cross_temporal", "velocity_barplot.pdf"), p_vel, width = 8, height = 5)
   cat("Saved velocity_barplot.pdf\n")
 
   fc_data <- list()
@@ -702,7 +702,7 @@ if (nrow(velocity_summary) > 0) {
       labs(x = "Time Point", y = "log2 Fold Change",
            title = "Response Magnitude: log2FC Distribution per Time Point") +
       theme_minimal(base_size = 14)
-    ggsave(file.path(out_dir, "temporal", "velocity_fc_boxplot.pdf"), p_box, width = 8, height = 5)
+    ggsave(file.path(out_dir, "cross_temporal", "velocity_fc_boxplot.pdf"), p_box, width = 8, height = 5)
     cat("Saved velocity_fc_boxplot.pdf\n")
   }
 }
@@ -808,7 +808,7 @@ if (length(nonref_tps) >= 2) {
       venn_sets <- list()
       for (tp in names(deg_sets)) venn_sets[[tp]] <- deg_sets[[tp]]
 
-      pdf(file.path(out_dir, "temporal", paste0("venn_plot_", cl, ".pdf")), width = 7, height = 7)
+      pdf(file.path(out_dir, "cross_temporal", paste0("venn_plot_", cl, ".pdf")), width = 7, height = 7)
       if (n_sets == 2) {
         grid.newpage()
         draw.pairwise.venn(
@@ -835,7 +835,7 @@ if (length(nonref_tps) >= 2) {
         )
       }
       dev.off()
-      png(file.path(out_dir, "temporal", paste0("venn_plot_", cl, ".png")), width = 7, height = 7,
+      png(file.path(out_dir, "cross_temporal", paste0("venn_plot_", cl, ".png")), width = 7, height = 7,
           units = "in", res = 150)
       if (n_sets == 2) {
         grid.newpage()
@@ -869,12 +869,12 @@ if (length(nonref_tps) >= 2) {
       colnames(upset_matrix) <- paste0(cl, "_", names(deg_sets))
       rownames(upset_matrix) <- upset_genes
 
-      pdf(file.path(out_dir, "temporal", paste0("upset_plot_", cl, ".pdf")), width = 10, height = 6)
+      pdf(file.path(out_dir, "cross_temporal", paste0("upset_plot_", cl, ".pdf")), width = 10, height = 6)
       print(upset(upset_matrix, intersect = colnames(upset_matrix),
                   name = paste0("DEG Overlaps: ", cl),
                   width_ratio = 0.3))
       dev.off()
-      png(file.path(out_dir, "temporal", paste0("upset_plot_", cl, ".png")), width = 10, height = 6,
+      png(file.path(out_dir, "cross_temporal", paste0("upset_plot_", cl, ".png")), width = 10, height = 6,
           units = "in", res = 150)
       print(upset(upset_matrix, intersect = colnames(upset_matrix),
                   name = paste0("DEG Overlaps: ", cl),
@@ -910,7 +910,7 @@ if (length(nonref_tps) >= 2) {
       lfc_mat_clamped[lfc_mat_clamped >  lim] <-  lim
       lfc_mat_clamped[lfc_mat_clamped < -lim] <- -lim
 
-      pdf(file.path(out_dir, "temporal", paste0("gene_activity_heatmap_", cl, ".pdf")),
+      pdf(file.path(out_dir, "cross_temporal", paste0("gene_activity_heatmap_", cl, ".pdf")),
           width = max(6, 2 + length(lfc_cols) * 1.2),
           height = max(6, nrow(lfc_mat) * 0.25))
       pheatmap(lfc_mat_clamped, annotation_row = ann_row, annotation_colors = ann_colors,
@@ -923,7 +923,7 @@ if (length(nonref_tps) >= 2) {
                number_format = "%.2f", number_color = "black",
                border_color = NA, legend = TRUE)
       dev.off()
-      png(file.path(out_dir, "temporal", paste0("gene_activity_heatmap_", cl, ".png")),
+      png(file.path(out_dir, "cross_temporal", paste0("gene_activity_heatmap_", cl, ".png")),
           width = max(6, 2 + length(lfc_cols) * 1.2),
           height = max(6, nrow(lfc_mat) * 0.25),
           units = "in", res = 150)
@@ -943,19 +943,19 @@ if (length(nonref_tps) >= 2) {
 
   venn_df <- do.call(rbind, venn_genelists)
   write.table(venn_df,
-              file = file.path(out_dir, "temporal", "venn_genelists.tsv"),
+              file = file.path(out_dir, "cross_temporal", "venn_genelists.tsv"),
               sep = "\t", row.names = FALSE, quote = FALSE)
   cat(sprintf("Wrote venn_genelists.tsv (%d entries)\n", nrow(venn_df)))
 
   persist_df <- do.call(rbind, persistence_rows)
   write.table(persist_df,
-              file = file.path(out_dir, "temporal", "persistence_classes.tsv"),
+              file = file.path(out_dir, "cross_temporal", "persistence_classes.tsv"),
               sep = "\t", row.names = FALSE, quote = FALSE)
   cat(sprintf("Wrote persistence_classes.tsv (%d entries)\n", nrow(persist_df)))
 
   gene_act_df <- do.call(rbind, gene_act_rows)
   write.table(gene_act_df,
-              file = file.path(out_dir, "temporal", "gene_activity.tsv"),
+              file = file.path(out_dir, "cross_temporal", "gene_activity.tsv"),
               sep = "\t", row.names = FALSE, quote = FALSE)
   cat(sprintf("Wrote gene_activity.tsv (%d entries)\n", nrow(gene_act_df)))
 
@@ -971,18 +971,18 @@ if (length(nonref_tps) >= 2) {
   cat("Only one non-reference timepoint; skipping Venn/persistence analysis.\n")
   write.table(data.frame(cell_line = character(), timepoint = character(),
                          gene_id = character(), stringsAsFactors = FALSE),
-              file = file.path(out_dir, "temporal", "venn_genelists.tsv"),
+              file = file.path(out_dir, "cross_temporal", "venn_genelists.tsv"),
               sep = "\t", row.names = FALSE, quote = FALSE)
   write.table(data.frame(gene_id = character(), cell_line = character(),
                          category = character(), first_timepoint = character(),
                          last_timepoint = character(), n_timepoints = integer(),
                          stringsAsFactors = FALSE),
-              file = file.path(out_dir, "temporal", "persistence_classes.tsv"),
+              file = file.path(out_dir, "cross_temporal", "persistence_classes.tsv"),
               sep = "\t", row.names = FALSE, quote = FALSE)
   write.table(data.frame(gene_id = character(), gene_symbol = character(),
                          cell_line = character(), category = character(),
                          stringsAsFactors = FALSE),
-              file = file.path(out_dir, "temporal", "gene_activity.tsv"),
+              file = file.path(out_dir, "cross_temporal", "gene_activity.tsv"),
               sep = "\t", row.names = FALSE, quote = FALSE)
 }
 
@@ -1145,7 +1145,7 @@ if (length(cl_ids) >= 2 && length(nonref_tps) >= 1) {
   if (length(cross_shared_rows) > 0) {
     cross_shared_df <- do.call(rbind, cross_shared_rows)
     write.table(cross_shared_df,
-                file = file.path(out_dir, "cross_cellline", "cross_cellline_shared.tsv"),
+                file = file.path(out_dir, "cross_temporal", "cross_cellline_shared.tsv"),
                 sep = "\t", row.names = FALSE, quote = FALSE)
     cat(sprintf("\nWrote cross_cellline_shared.tsv (%d rows)\n", nrow(cross_shared_df)))
   } else {
@@ -1156,7 +1156,7 @@ if (length(cl_ids) >= 2 && length(nonref_tps) >= 1) {
                            padj_2 = numeric(), concordance = character(),
                            magnitude_ratio = numeric(), magnitude_divergent = logical(),
                            stringsAsFactors = FALSE),
-                file = file.path(out_dir, "cross_cellline", "cross_cellline_shared.tsv"),
+                file = file.path(out_dir, "cross_temporal", "cross_cellline_shared.tsv"),
                 sep = "\t", row.names = FALSE, quote = FALSE)
     cat("Wrote cross_cellline_shared.tsv (empty)\n")
   }
@@ -1164,7 +1164,7 @@ if (length(cl_ids) >= 2 && length(nonref_tps) >= 1) {
   if (length(cross_specific_rows) > 0) {
     cross_specific_df <- do.call(rbind, cross_specific_rows)
     write.table(cross_specific_df,
-                file = file.path(out_dir, "cross_cellline", "cross_cellline_specific.tsv"),
+                file = file.path(out_dir, "cross_temporal", "cross_cellline_specific.tsv"),
                 sep = "\t", row.names = FALSE, quote = FALSE)
     cat(sprintf("Wrote cross_cellline_specific.tsv (%d rows)\n", nrow(cross_specific_df)))
   } else {
@@ -1172,7 +1172,7 @@ if (length(cl_ids) >= 2 && length(nonref_tps) >= 1) {
                            timepoint = character(), cell_line = character(),
                            log2FC = numeric(), padj = numeric(),
                            direction = character(), stringsAsFactors = FALSE),
-                file = file.path(out_dir, "cross_cellline", "cross_cellline_specific.tsv"),
+                file = file.path(out_dir, "cross_temporal", "cross_cellline_specific.tsv"),
                 sep = "\t", row.names = FALSE, quote = FALSE)
     cat("Wrote cross_cellline_specific.tsv (empty)\n")
   }
@@ -1197,7 +1197,7 @@ if (length(cl_ids) >= 2 && length(nonref_tps) >= 1) {
         la <- lfc_a[g]; lb <- lfc_b[g]
         !is.na(la) && !is.na(lb) && la < 0 && lb < 0 }))
 
-      pdf(file.path(out_dir, "cross_cellline", paste0("cross_venn_", tp, ".pdf")), width = 8, height = 7)
+      pdf(file.path(out_dir, "cross_temporal", paste0("cross_venn_", tp, ".pdf")), width = 8, height = 7)
       grid.newpage()
       draw.pairwise.venn(
         area1 = length(venn_sets[[1]]), area2 = length(venn_sets[[2]]),
@@ -1209,7 +1209,7 @@ if (length(cl_ids) >= 2 && length(nonref_tps) >= 1) {
       )
       dev.off()
 
-      png(file.path(out_dir, "cross_cellline", paste0("cross_venn_", tp, ".png")),
+      png(file.path(out_dir, "cross_temporal", paste0("cross_venn_", tp, ".png")),
           width = 8, height = 7, units = "in", res = 150)
       grid.newpage()
       draw.pairwise.venn(
@@ -1231,12 +1231,12 @@ if (length(cl_ids) >= 2 && length(nonref_tps) >= 1) {
       }))
       rownames(upset_matrix) <- all_deg_genes
 
-      pdf(file.path(out_dir, "cross_cellline", paste0("cross_upset_", tp, ".pdf")), width = 10, height = 6)
+      pdf(file.path(out_dir, "cross_temporal", paste0("cross_upset_", tp, ".pdf")), width = 10, height = 6)
       print(upset(upset_matrix, intersect = colnames(upset_matrix),
                   name = paste0("Cross-Cell-Line DEGs: ", tp),
                   width_ratio = 0.3))
       dev.off()
-      png(file.path(out_dir, "cross_cellline", paste0("cross_upset_", tp, ".png")),
+      png(file.path(out_dir, "cross_temporal", paste0("cross_upset_", tp, ".png")),
           width = 10, height = 6, units = "in", res = 150)
       print(upset(upset_matrix, intersect = colnames(upset_matrix),
                   name = paste0("Cross-Cell-Line DEGs: ", tp),
@@ -1352,10 +1352,10 @@ if (length(cl_ids) >= 2 && length(nonref_tps) >= 1) {
         theme(legend.position = "bottom",
               panel.grid.minor = element_blank())
 
-      pdf(file.path(out_dir, "cross_cellline", paste0("cross_scatter_", tp, ".pdf")), width = 8, height = 7.5)
+      pdf(file.path(out_dir, "cross_temporal", paste0("cross_scatter_", tp, ".pdf")), width = 8, height = 7.5)
       print(p)
       dev.off()
-      png(file.path(out_dir, "cross_cellline", paste0("cross_scatter_", tp, ".png")),
+      png(file.path(out_dir, "cross_temporal", paste0("cross_scatter_", tp, ".png")),
           width = 8, height = 7.5, units = "in", res = 150)
       print(p)
       dev.off()
@@ -1370,7 +1370,7 @@ if (length(cl_ids) >= 2 && length(nonref_tps) >= 1) {
     cross_persist <- cross_persist[, c("gene_id", "gene_symbol", "cell_line", "category")]
 
     write.table(cross_persist,
-                file = file.path(out_dir, "cross_cellline", "cross_persistence.tsv"),
+                file = file.path(out_dir, "cross_temporal", "cross_persistence.tsv"),
                 sep = "\t", row.names = FALSE, quote = FALSE)
     cat(sprintf("Wrote cross_persistence.tsv (%d rows)\n", nrow(cross_persist)))
 
@@ -1406,7 +1406,7 @@ if (length(cl_ids) >= 2 && length(nonref_tps) >= 1) {
             colnames(tab) <- paste0(cl_b_name, ": ", colnames(tab))
 
             # pheatmap with counts displayed
-            pdf(file.path(out_dir, "cross_cellline", "cross_persistence_heatmap.pdf"),
+            pdf(file.path(out_dir, "cross_temporal", "cross_persistence_heatmap.pdf"),
                 width = max(5, 1 + ncol(tab) * 1.8),
                 height = max(3.5, 1 + nrow(tab) * 0.8))
             pheatmap(tab,
@@ -1420,7 +1420,7 @@ if (length(cl_ids) >= 2 && length(nonref_tps) >= 1) {
                      legend_labels = as.character(round(seq(0, max(tab), length.out = 5))),
                      border_color = "grey80")
             dev.off()
-            png(file.path(out_dir, "cross_cellline", "cross_persistence_heatmap.png"),
+            png(file.path(out_dir, "cross_temporal", "cross_persistence_heatmap.png"),
                 width = max(5, 1 + ncol(tab) * 1.8),
                 height = max(3.5, 1 + nrow(tab) * 0.8),
                 units = "in", res = 150)
@@ -1451,18 +1451,18 @@ if (length(cl_ids) >= 2 && length(nonref_tps) >= 1) {
                          padj_2 = numeric(), concordance = character(),
                          magnitude_ratio = numeric(), magnitude_divergent = logical(),
                          stringsAsFactors = FALSE),
-              file = file.path(out_dir, "cross_cellline", "cross_cellline_shared.tsv"),
+              file = file.path(out_dir, "cross_temporal", "cross_cellline_shared.tsv"),
               sep = "\t", row.names = FALSE, quote = FALSE)
   write.table(data.frame(gene_id = character(), gene_symbol = character(),
                          timepoint = character(), cell_line = character(),
                          log2FC = numeric(), padj = numeric(),
                          direction = character(), stringsAsFactors = FALSE),
-              file = file.path(out_dir, "cross_cellline", "cross_cellline_specific.tsv"),
+              file = file.path(out_dir, "cross_temporal", "cross_cellline_specific.tsv"),
               sep = "\t", row.names = FALSE, quote = FALSE)
   write.table(data.frame(gene_id = character(), gene_symbol = character(),
                          cell_line = character(), category = character(),
                          stringsAsFactors = FALSE),
-              file = file.path(out_dir, "cross_cellline", "cross_persistence.tsv"),
+              file = file.path(out_dir, "cross_temporal", "cross_persistence.tsv"),
               sep = "\t", row.names = FALSE, quote = FALSE)
 }
 
@@ -1871,14 +1871,121 @@ if (length(cl_ids) >= 2 && length(tp_ids) >= 2) {
             )
           }
         }
+
+      # G7: Cross-temporal scatter plots (between-cell-line log2FC at tp_a vs tp_b)
+      if (length(tp_order) >= 2) {
+        tp_pairs <- combn(tp_order, 2, simplify = FALSE)
+        for (tp_pair in tp_pairs) {
+          tp_a <- tp_pair[1]; tp_b <- tp_pair[2]
+          deg_a <- ct_deg_sets[[tp_a]]; deg_b <- ct_deg_sets[[tp_b]]
+          if (is.null(deg_a) || is.null(deg_b)) next
+          if (length(deg_a) == 0 && length(deg_b) == 0) next
+
+          lfc_a_all <- ct_lfc_vals[[tp_a]]
+          lfc_b_all <- ct_lfc_vals[[tp_b]]
+
+          all_degs <- union(deg_a, deg_b)
+          scatter_df <- data.frame(
+            gene_id = all_degs,
+            log2FC_a = lfc_a_all[all_degs],
+            log2FC_b = lfc_b_all[all_degs],
+            stringsAsFactors = FALSE
+          )
+          scatter_df$gene_symbol <- combined$gene_symbol[match(scatter_df$gene_id, combined$gene_id)]
+          scatter_df$shared <- scatter_df$gene_id %in% intersect(deg_a, deg_b)
+          scatter_df$a_only <- scatter_df$gene_id %in% setdiff(deg_a, deg_b)
+          scatter_df$b_only <- scatter_df$gene_id %in% setdiff(deg_b, deg_a)
+
+          scatter_df$concordance <- "Specific"
+          scatter_df$magnitude_divergent <- FALSE
+          scatter_df$label <- ""
+
+          shared_ids <- intersect(deg_a, deg_b)
+          for (g in shared_ids) {
+            la <- lfc_a_all[g]; lb <- lfc_b_all[g]
+            if (!is.na(la) && !is.na(lb)) {
+              if (la > 0 && lb > 0) scatter_df$concordance[scatter_df$gene_id == g] <- "Up"
+              else if (la < 0 && lb < 0) scatter_df$concordance[scatter_df$gene_id == g] <- "Down"
+              else scatter_df$concordance[scatter_df$gene_id == g] <- "Discordant"
+            }
+            aa <- abs(la); ab <- abs(lb)
+            if (!is.na(aa) && !is.na(ab) && is.finite(aa) && is.finite(ab) && min(aa, ab) > 0) {
+              mr <- max(aa, ab) / min(aa, ab)
+              scatter_df$magnitude_divergent[scatter_df$gene_id == g] <- (mr > 2)
+            }
+          }
+          scatter_df$label[scatter_df$magnitude_divergent] <- scatter_df$gene_symbol[scatter_df$magnitude_divergent]
+
+          n_shared_up   <- sum(scatter_df$concordance == "Up")
+          n_shared_down <- sum(scatter_df$concordance == "Down")
+          n_discordant  <- sum(scatter_df$concordance == "Discordant")
+          n_specific_a  <- sum(scatter_df$a_only)
+          n_specific_b  <- sum(scatter_df$b_only)
+
+          max_abs <- max(abs(c(scatter_df$log2FC_a, scatter_df$log2FC_b)), na.rm = TRUE)
+          lim <- max_abs * 1.15
+          if (!is.finite(lim) || lim == 0) lim <- 5
+
+          scatter_df$pt_color <- NA
+          scatter_df$pt_color[scatter_df$concordance == "Up"]   <- "#E41A1C"
+          scatter_df$pt_color[scatter_df$concordance == "Down"] <- "#377EB8"
+          scatter_df$pt_color[scatter_df$concordance == "Discordant"] <- "#FF7F00"
+          scatter_df$pt_color[scatter_df$concordance == "Specific"]   <- "grey70"
+          scatter_df$pt_color[is.na(scatter_df$pt_color)] <- "grey70"
+
+          scatter_df$pt_size <- ifelse(scatter_df$concordance == "Specific", 0.8, 1.5)
+          scatter_df$pt_alpha <- ifelse(scatter_df$concordance == "Specific", 0.4, 0.7)
+          scatter_df <- scatter_df[order(scatter_df$concordance == "Specific"), ]
+
+          p <- ggplot(scatter_df, aes(x = log2FC_a, y = log2FC_b)) +
+            geom_hline(yintercept = 0, color = "grey60", linewidth = 0.4) +
+            geom_vline(xintercept = 0, color = "grey60", linewidth = 0.4) +
+            geom_abline(slope = 1, intercept = 0, color = "grey40", linetype = "dashed", linewidth = 0.5) +
+            geom_point(aes(color = pt_color), size = scatter_df$pt_size, alpha = scatter_df$pt_alpha) +
+            scale_color_identity(
+              guide = guide_legend(title = NULL),
+              labels = c(
+                "#E41A1C" = paste0("Both up (n=", n_shared_up, ")"),
+                "#377EB8" = paste0("Both down (n=", n_shared_down, ")"),
+                "#FF7F00" = paste0("Discordant (n=", n_discordant, ")"),
+                "grey70" = paste0(tp_a, "-specific (", n_specific_a, ") / ", tp_b, "-specific (", n_specific_b, ")")
+              ),
+              breaks = c("#E41A1C", "#377EB8", "#FF7F00", "grey70")
+            ) +
+            geom_text_repel(aes(label = label), size = 3, max.overlaps = 25,
+                            box.padding = 0.5, point.padding = 0.3, na.rm = TRUE) +
+            coord_fixed(xlim = c(-lim, lim), ylim = c(-lim, lim)) +
+            labs(
+              x = paste0("log2FC @ ", tp_a), y = paste0("log2FC @ ", tp_b),
+              title = paste0("Cross-Temporal Divergence: ", pair_key),
+              subtitle = paste0("Shared: ", n_shared_up + n_shared_down + n_discordant,
+                                " genes (", n_shared_up, " up, ", n_shared_down, " down",
+                                if (n_discordant > 0) paste0(", ", n_discordant, " discordant") else "", ")")
+            ) +
+            theme_minimal(base_size = 13) +
+            theme(legend.position = "bottom", panel.grid.minor = element_blank())
+
+          tag_pair <- gsub("_vs_", "v", pair_key)
+          tag_tps   <- paste0(tag_pair, "_", tp_a, "_vs_", tp_b)
+          pdf(file.path(out_dir, "cross_cellline",
+              paste0("cross_temporal_scatter_", tag_tps, ".pdf")), width = 8, height = 7.5)
+          print(p)
+          dev.off()
+          png(file.path(out_dir, "cross_cellline",
+              paste0("cross_temporal_scatter_", tag_tps, ".png")),
+              width = 8, height = 7.5, units = "in", res = 150)
+          print(p)
+          dev.off()
+          cat(sprintf("  Saved cross_temporal_scatter_%s.pdf / .png\n", tag_tps))
+        }
       }
-    }
+      }
 
     # Write output tables
     if (length(cross_temp_persistence) > 0) {
       cross_persist_df <- do.call(rbind, cross_temp_persistence)
       write.table(cross_persist_df,
-                  file = file.path(out_dir, "cross_temporal", "cross_temporal_persistence.tsv"),
+                  file = file.path(out_dir, "cross_cellline", "cross_temporal_persistence.tsv"),
                   sep = "\t", row.names = FALSE, quote = FALSE)
       cat(sprintf("\nWrote cross_temporal_persistence.tsv (%d rows)\n",
                   nrow(cross_persist_df)))
@@ -1886,7 +1993,7 @@ if (length(cl_ids) >= 2 && length(tp_ids) >= 2) {
     if (length(cross_temp_gene_activity) > 0) {
       cross_ga_df <- do.call(rbind, cross_temp_gene_activity)
       write.table(cross_ga_df,
-                  file = file.path(out_dir, "cross_temporal", "cross_temporal_gene_activity.tsv"),
+                  file = file.path(out_dir, "cross_cellline", "cross_temporal_gene_activity.tsv"),
                   sep = "\t", row.names = FALSE, quote = FALSE)
       cat(sprintf("Wrote cross_temporal_gene_activity.tsv (%d rows)\n",
                   nrow(cross_ga_df)))
@@ -1894,7 +2001,7 @@ if (length(cl_ids) >= 2 && length(tp_ids) >= 2) {
     if (length(cross_temp_velocity) > 0) {
       cross_vel_df <- do.call(rbind, cross_temp_velocity)
       write.table(cross_vel_df,
-                  file = file.path(out_dir, "cross_temporal", "cross_temporal_velocity.tsv"),
+                  file = file.path(out_dir, "cross_cellline", "cross_temporal_velocity.tsv"),
                   sep = "\t", row.names = FALSE, quote = FALSE)
       cat(sprintf("Wrote cross_temporal_velocity.tsv (%d rows)\n",
                   nrow(cross_vel_df)))
@@ -1902,7 +2009,7 @@ if (length(cl_ids) >= 2 && length(tp_ids) >= 2) {
     if (length(cross_temp_venn) > 0) {
       cross_venn_df <- do.call(rbind, cross_temp_venn)
       write.table(cross_venn_df,
-                  file = file.path(out_dir, "cross_temporal", "cross_temporal_venn_genelists.tsv"),
+                  file = file.path(out_dir, "cross_cellline", "cross_temporal_venn_genelists.tsv"),
                   sep = "\t", row.names = FALSE, quote = FALSE)
       cat(sprintf("Wrote cross_temporal_venn_genelists.tsv (%d rows)\n",
                   nrow(cross_venn_df)))
@@ -1911,7 +2018,7 @@ if (length(cl_ids) >= 2 && length(tp_ids) >= 2) {
     if (length(cross_tshared_rows) > 0) {
       cross_tshared_df <- do.call(rbind, cross_tshared_rows)
       write.table(cross_tshared_df,
-                  file = file.path(out_dir, "cross_temporal", "cross_temporal_shared.tsv"),
+                  file = file.path(out_dir, "cross_cellline", "cross_temporal_shared.tsv"),
                   sep = "\t", row.names = FALSE, quote = FALSE)
       cat(sprintf("Wrote cross_temporal_shared.tsv (%d rows)\n",
                   nrow(cross_tshared_df)))
@@ -1923,13 +2030,13 @@ if (length(cl_ids) >= 2 && length(tp_ids) >= 2) {
                               concordance = character(), magnitude_ratio = numeric(),
                               magnitude_divergent = logical(),
                               stringsAsFactors = FALSE),
-                  file = file.path(out_dir, "cross_temporal", "cross_temporal_shared.tsv"),
+                  file = file.path(out_dir, "cross_cellline", "cross_temporal_shared.tsv"),
                   sep = "\t", row.names = FALSE, quote = FALSE)
     }
     if (length(cross_tspecific_rows) > 0) {
       cross_tspecific_df <- do.call(rbind, cross_tspecific_rows)
       write.table(cross_tspecific_df,
-                  file = file.path(out_dir, "cross_temporal", "cross_temporal_specific.tsv"),
+                  file = file.path(out_dir, "cross_cellline", "cross_temporal_specific.tsv"),
                   sep = "\t", row.names = FALSE, quote = FALSE)
       cat(sprintf("Wrote cross_temporal_specific.tsv (%d rows)\n",
                   nrow(cross_tspecific_df)))
@@ -1939,7 +2046,7 @@ if (length(cl_ids) >= 2 && length(tp_ids) >= 2) {
                               log2FC = numeric(), padj = numeric(),
                               direction = character(),
                               stringsAsFactors = FALSE),
-                  file = file.path(out_dir, "cross_temporal", "cross_temporal_specific.tsv"),
+                  file = file.path(out_dir, "cross_cellline", "cross_temporal_specific.tsv"),
                   sep = "\t", row.names = FALSE, quote = FALSE)
     }
 
@@ -1953,32 +2060,33 @@ if (length(cl_ids) >= 2 && length(tp_ids) >= 2) {
              title = "Cell Line Divergence Velocity: Between-Cell-Line DEGs per Timepoint",
              fill = "Comparison") +
         theme_minimal(base_size = 14)
-      ggsave(file.path(out_dir, "cross_temporal", "cross_temporal_velocity_barplot.pdf"),
+      ggsave(file.path(out_dir, "cross_cellline", "cross_temporal_velocity_barplot.pdf"),
              p_cv, width = 8, height = 5)
       cat("Saved cross_temporal_velocity_barplot.pdf\n")
     }
+  }
 
   } else {
     cat("No between-cell-line contrasts with >= 2 timepoints; skipping cross-temporal analysis.\n")
     write.table(data.frame(gene_id = character(), pair = character(),
                             category = character(), n_timepoints = integer(),
                             stringsAsFactors = FALSE),
-                file = file.path(out_dir, "cross_temporal", "cross_temporal_persistence.tsv"),
+                file = file.path(out_dir, "cross_cellline", "cross_temporal_persistence.tsv"),
                 sep = "\t", row.names = FALSE, quote = FALSE)
     write.table(data.frame(gene_id = character(), gene_symbol = character(),
                             pair = character(), category = character(),
                             stringsAsFactors = FALSE),
-                file = file.path(out_dir, "cross_temporal", "cross_temporal_gene_activity.tsv"),
+                file = file.path(out_dir, "cross_cellline", "cross_temporal_gene_activity.tsv"),
                 sep = "\t", row.names = FALSE, quote = FALSE)
     write.table(data.frame(pair = character(), timepoint = character(),
                             n_up = integer(), n_down = integer(),
                             n_total = integer(), mean_abs_log2FC = numeric(),
                             stringsAsFactors = FALSE),
-                file = file.path(out_dir, "cross_temporal", "cross_temporal_velocity.tsv"),
+                file = file.path(out_dir, "cross_cellline", "cross_temporal_velocity.tsv"),
                 sep = "\t", row.names = FALSE, quote = FALSE)
     write.table(data.frame(pair = character(), timepoint = character(),
                             gene_id = character(), stringsAsFactors = FALSE),
-                file = file.path(out_dir, "cross_temporal", "cross_temporal_venn_genelists.tsv"),
+                file = file.path(out_dir, "cross_cellline", "cross_temporal_venn_genelists.tsv"),
                 sep = "\t", row.names = FALSE, quote = FALSE)
     write.table(data.frame(gene_id = character(), gene_symbol = character(),
                             pair = character(), tp_1 = character(), tp_2 = character(),
@@ -1987,14 +2095,14 @@ if (length(cl_ids) >= 2 && length(tp_ids) >= 2) {
                             concordance = character(), magnitude_ratio = numeric(),
                             magnitude_divergent = logical(),
                             stringsAsFactors = FALSE),
-                file = file.path(out_dir, "cross_temporal", "cross_temporal_shared.tsv"),
+                file = file.path(out_dir, "cross_cellline", "cross_temporal_shared.tsv"),
                 sep = "\t", row.names = FALSE, quote = FALSE)
     write.table(data.frame(gene_id = character(), gene_symbol = character(),
                             pair = character(), timepoint = character(),
                             log2FC = numeric(), padj = numeric(),
                             direction = character(),
                             stringsAsFactors = FALSE),
-                file = file.path(out_dir, "cross_temporal", "cross_temporal_specific.tsv"),
+                file = file.path(out_dir, "cross_cellline", "cross_temporal_specific.tsv"),
                 sep = "\t", row.names = FALSE, quote = FALSE)
   }
 
@@ -2003,22 +2111,22 @@ if (length(cl_ids) >= 2 && length(tp_ids) >= 2) {
   write.table(data.frame(gene_id = character(), pair = character(),
                           category = character(), n_timepoints = integer(),
                           stringsAsFactors = FALSE),
-              file = file.path(out_dir, "cross_temporal", "cross_temporal_persistence.tsv"),
+              file = file.path(out_dir, "cross_cellline", "cross_temporal_persistence.tsv"),
               sep = "\t", row.names = FALSE, quote = FALSE)
   write.table(data.frame(gene_id = character(), gene_symbol = character(),
                           pair = character(), category = character(),
                           stringsAsFactors = FALSE),
-              file = file.path(out_dir, "cross_temporal", "cross_temporal_gene_activity.tsv"),
+              file = file.path(out_dir, "cross_cellline", "cross_temporal_gene_activity.tsv"),
               sep = "\t", row.names = FALSE, quote = FALSE)
   write.table(data.frame(pair = character(), timepoint = character(),
                           n_up = integer(), n_down = integer(),
                           n_total = integer(), mean_abs_log2FC = numeric(),
                           stringsAsFactors = FALSE),
-              file = file.path(out_dir, "cross_temporal", "cross_temporal_velocity.tsv"),
+              file = file.path(out_dir, "cross_cellline", "cross_temporal_velocity.tsv"),
               sep = "\t", row.names = FALSE, quote = FALSE)
   write.table(data.frame(pair = character(), timepoint = character(),
                           gene_id = character(), stringsAsFactors = FALSE),
-              file = file.path(out_dir, "cross_temporal", "cross_temporal_venn_genelists.tsv"),
+              file = file.path(out_dir, "cross_cellline", "cross_temporal_venn_genelists.tsv"),
               sep = "\t", row.names = FALSE, quote = FALSE)
   write.table(data.frame(gene_id = character(), gene_symbol = character(),
                           pair = character(), tp_1 = character(), tp_2 = character(),
@@ -2027,14 +2135,14 @@ if (length(cl_ids) >= 2 && length(tp_ids) >= 2) {
                           concordance = character(), magnitude_ratio = numeric(),
                           magnitude_divergent = logical(),
                           stringsAsFactors = FALSE),
-              file = file.path(out_dir, "cross_temporal", "cross_temporal_shared.tsv"),
+              file = file.path(out_dir, "cross_cellline", "cross_temporal_shared.tsv"),
               sep = "\t", row.names = FALSE, quote = FALSE)
   write.table(data.frame(gene_id = character(), gene_symbol = character(),
                           pair = character(), timepoint = character(),
                           log2FC = numeric(), padj = numeric(),
                           direction = character(),
                           stringsAsFactors = FALSE),
-              file = file.path(out_dir, "cross_temporal", "cross_temporal_specific.tsv"),
+              file = file.path(out_dir, "cross_cellline", "cross_temporal_specific.tsv"),
               sep = "\t", row.names = FALSE, quote = FALSE)
 }
 

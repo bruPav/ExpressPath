@@ -59,18 +59,18 @@ gsea_kegg <- read.delim(file.path(out_dir, "gsea_kegg_signif.tsv"),
                         stringsAsFactors = FALSE)
 
 # Load temporal analysis results
-cluster_assign <- tryRead(file.path(results_dir, "temporal", "cluster_assignments.tsv"))
-cluster_prof  <- tryRead(file.path(results_dir, "temporal", "cluster_mean_profiles.tsv"))
-velocity      <- tryRead(file.path(results_dir, "temporal", "velocity_summary.tsv"))
-venn_genes    <- tryRead(file.path(results_dir, "temporal", "venn_genelists.tsv"))
-persist       <- tryRead(file.path(results_dir, "temporal", "persistence_classes.tsv"))
-gene_activity <- tryRead(file.path(results_dir, "temporal", "gene_activity.tsv"))
+cluster_assign <- tryRead(file.path(results_dir, "cross_temporal", "cluster_assignments.tsv"))
+cluster_prof  <- tryRead(file.path(results_dir, "cross_temporal", "cluster_mean_profiles.tsv"))
+velocity      <- tryRead(file.path(results_dir, "cross_temporal", "velocity_summary.tsv"))
+venn_genes    <- tryRead(file.path(results_dir, "cross_temporal", "venn_genelists.tsv"))
+persist       <- tryRead(file.path(results_dir, "cross_temporal", "persistence_classes.tsv"))
+gene_activity <- tryRead(file.path(results_dir, "cross_temporal", "gene_activity.tsv"))
 
 # Cross-temporal analysis (Step G)
-cross_tpersist <- tryRead(file.path(results_dir, "cross_temporal", "cross_temporal_persistence.tsv"))
-cross_tvel      <- tryRead(file.path(results_dir, "cross_temporal", "cross_temporal_velocity.tsv"))
-cross_tga       <- tryRead(file.path(results_dir, "cross_temporal", "cross_temporal_gene_activity.tsv"))
-cross_tvenn     <- tryRead(file.path(results_dir, "cross_temporal", "cross_temporal_venn_genelists.tsv"))
+cross_tpersist <- tryRead(file.path(results_dir, "cross_cellline", "cross_temporal_persistence.tsv"))
+cross_tvel      <- tryRead(file.path(results_dir, "cross_cellline", "cross_temporal_velocity.tsv"))
+cross_tga       <- tryRead(file.path(results_dir, "cross_cellline", "cross_temporal_gene_activity.tsv"))
+cross_tvenn     <- tryRead(file.path(results_dir, "cross_cellline", "cross_temporal_venn_genelists.tsv"))
 
 # Map ENSG -> ENTREZ
 ensg_ids <- combined$gene_id
@@ -866,9 +866,9 @@ venn_imgs <- list()
 heat_imgs <- list()
 for (cl in cl_ids) {
   # Try Venn first, then UpSet
-  png_path <- file.path(results_dir, "temporal", paste0("venn_plot_", cl, ".png"))
+  png_path <- file.path(results_dir, "cross_temporal", paste0("venn_plot_", cl, ".png"))
   if (!file.exists(png_path)) {
-    png_path <- file.path(results_dir, "temporal", paste0("upset_plot_", cl, ".png"))
+    png_path <- file.path(results_dir, "cross_temporal", paste0("upset_plot_", cl, ".png"))
   }
   if (file.exists(png_path)) {
     venn_imgs[[cl]] <- base64encode(readBin(png_path, "raw", file.info(png_path)$size))
@@ -1027,12 +1027,12 @@ if (has_cross_temporal) {
   for (pr in unique(c(cross_tvel$pair, cross_tga$pair))) {
     tag <- gsub("_vs_", "v", pr)
     # Venn
-    venn_path <- file.path(results_dir, "cross_temporal", paste0("cross_temporal_venn_", tag, ".png"))
+    venn_path <- file.path(results_dir, "cross_cellline", paste0("cross_temporal_venn_", tag, ".png"))
     if (file.exists(venn_path)) {
       ct_venn_imgs[[pr]] <- base64encode(readBin(venn_path, "raw", file.info(venn_path)$size))
     }
     # Heatmap
-    heat_path <- file.path(results_dir, "cross_temporal", paste0("cross_temporal_activity_heatmap_", tag, ".png"))
+    heat_path <- file.path(results_dir, "cross_cellline", paste0("cross_temporal_activity_heatmap_", tag, ".png"))
     if (file.exists(heat_path)) {
       ct_heat_imgs[[pr]] <- base64encode(readBin(heat_path, "raw", file.info(heat_path)$size))
     }

@@ -37,22 +37,24 @@ cat("=== TF Target Enrichment (enrichR) ===\n")
 cat(sprintf("Output dir: %s\n", out_dir))
 cat(sprintf("Databases: %s\n", paste(enrichr_dbs, collapse = ", ")))
 
-# Create output directory
+# Create output directories
 dir.create(file.path(out_dir, "tf"), showWarnings = FALSE, recursive = TRUE)
+dir.create(file.path(out_dir, "tf", "cross_cellline"), showWarnings = FALSE, recursive = TRUE)
+dir.create(file.path(out_dir, "tf", "cross_temporal"), showWarnings = FALSE, recursive = TRUE)
 min_genes <- 5       # minimum valid symbols per gene set
 top_n_tfs <- 5       # top TFs per gene set for dotplot
 
 # --- 1. Load data ---
-cross_shared <- read.table(file.path(out_dir, "cross_cellline", "cross_cellline_shared.tsv"),
+cross_shared <- read.table(file.path(out_dir, "cross_temporal", "cross_cellline_shared.tsv"),
                            header = TRUE, sep = "\t", stringsAsFactors = FALSE)
-persist_df <- read.table(file.path(out_dir, "temporal", "persistence_classes.tsv"),
+persist_df <- read.table(file.path(out_dir, "cross_temporal", "persistence_classes.tsv"),
                          header = TRUE, sep = "\t", stringsAsFactors = FALSE)
 annot <- read.table(file.path(out_dir, "tables", "gene_annotations.tsv"),
                     header = TRUE, sep = "\t", stringsAsFactors = FALSE,
                     quote = "", fill = TRUE, comment.char = "")
 
 # Cross-temporal persistence (Step G)
-cross_tpersist_file <- file.path(out_dir, "cross_temporal", "cross_temporal_persistence.tsv")
+cross_tpersist_file <- file.path(out_dir, "cross_cellline", "cross_temporal_persistence.tsv")
 if (file.exists(cross_tpersist_file)) {
   cross_tpersist <- read.table(cross_tpersist_file,
                                 header = TRUE, sep = "\t", stringsAsFactors = FALSE)
@@ -126,7 +128,7 @@ if (nrow(cross_tpersist) > 0) {
   }
 
   # Divergence up/down: emergent genes with known direction
-  cross_ga_file <- file.path(out_dir, "cross_temporal", "cross_temporal_gene_activity.tsv")
+  cross_ga_file <- file.path(out_dir, "cross_cellline", "cross_temporal_gene_activity.tsv")
   if (file.exists(cross_ga_file)) {
     cross_ga <- read.table(cross_ga_file,
                            header = TRUE, sep = "\t", stringsAsFactors = FALSE)
@@ -379,6 +381,9 @@ if (nrow(sig_tfs) > 0) {
     slice_min(adj_pvalue, n = 1, with_ties = FALSE) %>%
     ungroup()
 
+  # Preserve full dataset for focused heatmaps
+  sig_best_full <- sig_best
+
   # Cap at top 50 TFs by minimum adj_pvalue
   tf_order_df <- sig_best %>%
     group_by(TF) %>%
@@ -457,7 +462,7 @@ if (nrow(sig_tfs) > 0) {
   gs_type <- sapply(colnames(heat_mat), function(gs) {
     if (grepl("^Shared_", gs)) "Shared"
     else if (grepl("^Cross_", gs)) "Cross"
-    else if (grepl("^Divergence_", gs)) "Divergence"
+    else if (grepl("^Div", gs)) "Divergence"
     else "Per_CellLine"
   })
   ann_col <- data.frame(Type = gs_type, row.names = colnames(heat_mat))
@@ -548,6 +553,89 @@ if (nrow(sig_tfs) > 0) {
            name              = "-log10(adj.p)")
   dev.off()
   cat(sprintf("Saved tf_enrichment_heatmap.pdf / .png\n"))
+
+  # --- 8c. Focused heatmaps per analysis dimension ---
+  build_focused_heatmap <- function(subset_type, subdir, title, sig_data = sig_best_full) {
+    gs_allowed <- names(gs_type)[gs_type %in% subset_type]
+    if (length(gs_allowed) == 0) return(FALSE)
+    sb <- sig_data[sig_data$gene_set %in% gs_allowed, ]
+    if (nrow(sb) == 0) return(FALSE)
+
+    sb$gene_set <- factor(sb$gene_set, levels = intersect(gs_levels, unique(sb$gene_set)))
+    tf_focus <- sb %>%
+      group_by(TF) %>%
+      summarise(min_padj = min(adj_pvalue), .groups = "drop") %>%
+      arrange(min_padj)
+    top_focus <- head(tf_focus$TF, min(50, nrow(tf_focus)))
+    sb <- sb[sb$TF %in% top_focus, ]
+    sb$TF <- factor(sb$TF, levels = rev(top_focus))
+
+    gs_focus <- sort(unique(as.character(sb$gene_set)))
+    tf_focus_levels <- levels(sb$TF)
+
+    fmat <- matrix(0, nrow = length(tf_focus_levels), ncol = length(gs_focus))
+    rownames(fmat) <- tf_focus_levels
+    colnames(fmat) <- gs_focus
+    omat <- matrix("", nrow = length(tf_focus_levels), ncol = length(gs_focus))
+    rownames(omat) <- tf_focus_levels
+    colnames(omat) <- gs_focus
+
+    for (i in seq_len(nrow(sb))) {
+      ti <- match(as.character(sb$TF[i]), tf_focus_levels)
+      gi <- match(sb$gene_set[i], gs_focus)
+      if (!is.na(ti) && !is.na(gi)) {
+        fmat[ti, gi] <- -log10(sb$adj_pvalue[i])
+        omat[ti, gi] <- as.character(sb$n_overlap[i])
+      }
+    }
+
+    tf_clean_f <- sb$TF_clean[match(tf_focus_levels, sb$TF)]
+    tf_clean_f[is.na(tf_clean_f)] <- tf_focus_levels[is.na(tf_clean_f)]
+    rownames(fmat) <- tf_clean_f
+    rownames(omat) <- tf_clean_f
+
+    fmax <- max(fmat, na.rm = TRUE)
+    if (!is.finite(fmax) || fmax == 0) fmax <- 3
+
+    fw <- min(14, 3 + length(gs_focus) * 1.2)
+    fh <- max(5, 2 + length(tf_focus_levels) * 0.3)
+
+    fbreaks <- seq(0, fmax + 0.5, length.out = 100)
+    fcolors <- colorRampPalette(c("white", "#4DAF4A", "#FF7F00", "#E41A1C"))(100)
+
+    pdf(file.path(out_dir, "tf", subdir, "tf_enrichment_heatmap.pdf"),
+        width = fw, height = fh)
+    pheatmap(fmat,
+             cluster_rows = (nrow(fmat) > 2), cluster_cols = (ncol(fmat) > 2),
+             display_numbers = omat, number_format = "%s",
+             number_color = "black", fontsize_number = 8,
+             color = fcolors, breaks = fbreaks,
+             main = title, fontsize = 10, fontsize_row = 9,
+             fontsize_col = 10, border_color = "grey80",
+             legend_breaks = seq(0, ceiling(fmax), by = 1),
+             name = "-log10(adj.p)")
+    dev.off()
+
+    png(file.path(out_dir, "tf", subdir, "tf_enrichment_heatmap.png"),
+        width = fw, height = fh, units = "in", res = 150)
+    pheatmap(fmat,
+             cluster_rows = (nrow(fmat) > 2), cluster_cols = (ncol(fmat) > 2),
+             display_numbers = omat, number_format = "%s",
+             number_color = "black", fontsize_number = 8,
+             color = fcolors, breaks = fbreaks,
+             main = title, fontsize = 10, fontsize_row = 9,
+             fontsize_col = 10, border_color = "grey80",
+             legend_breaks = seq(0, ceiling(fmax), by = 1),
+             name = "-log10(adj.p)")
+    dev.off()
+    cat(sprintf("Saved %s/tf_enrichment_heatmap.pdf / .png\n", subdir))
+    return(TRUE)
+  }
+
+  build_focused_heatmap(c("Shared", "Per_CellLine", "Cross"),
+    "cross_cellline", "TF Enrichment: Cross-Cell-Line Gene Sets")
+  build_focused_heatmap(c("Divergence"),
+    "cross_temporal", "TF Enrichment: Cross-Temporal Gene Sets")
 } else {
   cat("No TFs with library-level adj.p < 0.05; skipping heatmap.\n")
 }
@@ -742,9 +830,13 @@ if (nrow(sig_net) > 0 && n_sig_tfs >= 1) {
       theme_graph(base_family = "sans") + theme(legend.position = "bottom")
 
     tag <- tolower(net_name)
-    ggsave(file.path(out_dir, "tf", paste0("tf_regulatory_network_", tag, ".pdf")),
+
+    # Route: cell-line + shared → cross_cellline/; divergence → cross_temporal/
+    net_subdir <- if (grepl("^div", tag)) "cross_temporal" else "cross_cellline"
+
+    ggsave(file.path(out_dir, "tf", net_subdir, paste0("tf_regulatory_network_", tag, ".pdf")),
            p_net, width = 16, height = 14)
-    ggsave(file.path(out_dir, "tf", paste0("tf_regulatory_network_", tag, ".png")),
+    ggsave(file.path(out_dir, "tf", net_subdir, paste0("tf_regulatory_network_", tag, ".png")),
            p_net, width = 16, height = 14, dpi = 150)
     cat(sprintf("  Saved tf_regulatory_network_%s.pdf / .png\n", tag))
 
@@ -809,7 +901,7 @@ if (nrow(sig_net) > 0 && n_sig_tfs >= 1) {
                   list(label = "Divergent (differs per cell line)", shape = "star", color = "grey70", size = 14)
                 ))
 
-    visSave(vis_net, file.path(out_dir, "tf", paste0("tf_regulatory_network_", tag, ".html")),
+    visSave(vis_net, file.path(out_dir, "tf", net_subdir, paste0("tf_regulatory_network_", tag, ".html")),
             selfcontained = TRUE)
     cat(sprintf("  Saved tf_regulatory_network_%s.html\n", tag))
   }
