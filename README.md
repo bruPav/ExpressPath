@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logo.png" alt="ExpressPath" height="120">
+</p>
+
 # ExpressPath
 
 RNA-seq time course analysis pipeline — DESeq2 differential expression →
