@@ -150,6 +150,15 @@ if (length(gsea_kegg_all) > 0) {
               sep = "\t", row.names = FALSE, quote = FALSE)
   cat(sprintf("  gsea_kegg_signif.tsv: %d significant enrichments\n",
               nrow(gsea_kegg_sig)))
+} else {
+  write.table(data.frame(ID = character(), Description = character(),
+    setSize = integer(), enrichmentScore = numeric(), NES = numeric(),
+    pvalue = numeric(), p.adjust = numeric(), qvalue = numeric(),
+    rank = numeric(), leading_edge = character(), core_enrichment = character(),
+    contrast = character(), stringsAsFactors = FALSE),
+    file = file.path(out_dir, "gsea_kegg_signif.tsv"),
+    sep = "\t", row.names = FALSE, quote = FALSE)
+  cat("  gsea_kegg_signif.tsv: 0 significant enrichments (empty)\n")
 }
 
 if (length(gsea_go_all) > 0) {
@@ -165,6 +174,15 @@ if (length(gsea_go_all) > 0) {
               sep = "\t", row.names = FALSE, quote = FALSE)
   cat(sprintf("  gsea_go_signif.tsv: %d significant enrichments\n",
               nrow(gsea_go_sig)))
+} else {
+  write.table(data.frame(ID = character(), Description = character(),
+    setSize = integer(), enrichmentScore = numeric(), NES = numeric(),
+    pvalue = numeric(), p.adjust = numeric(), qvalue = numeric(),
+    rank = numeric(), leading_edge = character(), core_enrichment = character(),
+    contrast = character(), stringsAsFactors = FALSE),
+    file = file.path(out_dir, "gsea_go_signif.tsv"),
+    sep = "\t", row.names = FALSE, quote = FALSE)
+  cat("  gsea_go_signif.tsv: 0 significant enrichments (empty)\n")
 }
 
 # --- GSEA Dot Plot ---
@@ -190,6 +208,11 @@ if (length(gsea_kegg_all) > 0 && nrow(gsea_kegg_sig) > 2) {
          width = 16, height = max(8, nrow(gsea_kegg_sig) * 0.15),
          limitsize = FALSE)
   cat("  Saved gsea_dotplot_kegg.pdf\n")
+} else {
+  pdf(file.path(out_dir, "gsea_dotplot_kegg.pdf"), width = 6, height = 4)
+  print(ggplot() + theme_void() + labs(title = "GSEA KEGG: No significant enrichments"))
+  dev.off()
+  cat("  Saved gsea_dotplot_kegg.pdf (blank — no significant enrichments)\n")
 }
 
 # ==============================
@@ -432,6 +455,13 @@ if (length(all_diff) > 0) {
     dev.off()
     cat("  Saved gsva_heatmap.pdf\n")
   }
+} else {
+  write.table(data.frame(test = character(), pathway = character(),
+    mean_diff = numeric(), pvalue = numeric(), padj = numeric(),
+    stringsAsFactors = FALSE),
+    file = file.path(out_dir, "gsva_diff_results.tsv"),
+    sep = "\t", row.names = FALSE, quote = FALSE)
+  cat("  gsva_diff_results.tsv: 0 rows (empty — no differential tests)\n")
 }
 
 # --- GSVA Dot/Bar Plot ---
@@ -462,6 +492,11 @@ if (exists("diff_table") && nrow(diff_table) > 0) {
          width = 14, height = max(8, nrow(top_diff) * 0.15),
          limitsize = FALSE)
   cat("  Saved gsva_diff_dotplot.pdf\n")
+} else {
+  pdf(file.path(out_dir, "gsva_diff_dotplot.pdf"), width = 6, height = 4)
+  print(ggplot() + theme_void() + labs(title = "GSVA: No significant pathway changes"))
+  dev.off()
+  cat("  Saved gsva_diff_dotplot.pdf (blank — no significant changes)\n")
 }
 
 cat("\n=== Pathway Analysis Complete ===\n")

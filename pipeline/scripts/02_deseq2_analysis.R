@@ -767,9 +767,16 @@ if (length(nonref_tps) >= 2) {
           category <- "Transient_Mid"
         }
       } else {
-        if (first_tp == nonref_tps[1] && last_tp == tail(nonref_tps, 1)) {
+        tp_indices <- match(tps_present, nonref_tps)
+        tp_indices <- tp_indices[!is.na(tp_indices)]
+        expected <- seq(from = min(tp_indices), to = max(tp_indices))
+        is_contiguous <- identical(expected, sort(tp_indices))
+
+        if (is_contiguous && first_tp == nonref_tps[1] && last_tp == tail(nonref_tps, 1)) {
           category <- "Sustained"
-        } else if (first_tp == nonref_tps[1]) {
+        } else if (n_tps >= 2 && first_tp == nonref_tps[1] && last_tp == tail(nonref_tps, 1)) {
+          category <- "Intermittent"
+        } else if (is_contiguous && first_tp == nonref_tps[1]) {
           category <- "Partially_Sustained"
         } else {
           category <- "Complex"

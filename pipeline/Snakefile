@@ -35,8 +35,15 @@ if not os.path.exists(input_tsv_path):
 
 # --- Resolve run_id ---
 run_id_raw = config.get("run_id", "auto")
+run_id_file = ".snakemake_run_id"
 if run_id_raw == "auto":
-    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    if os.path.exists(run_id_file):
+        with open(run_id_file) as f:
+            run_id = f.read().strip()
+    else:
+        run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        with open(run_id_file, "w") as f:
+            f.write(run_id)
 else:
     run_id = run_id_raw
 
@@ -114,7 +121,8 @@ report_file    = f"{pathway_dir}/interactive_report.html"
 # --- Default target ---
 rule all:
     input:
-        report_file
+        report_file,
+        f"{out_dir}/.cleaned"
 
 
 # --- Step 1: Extract count matrix, metadata, gene annotations ---

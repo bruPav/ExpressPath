@@ -874,7 +874,7 @@ for (cl in cl_ids) {
     venn_imgs[[cl]] <- base64encode(readBin(png_path, "raw", file.info(png_path)$size))
   }
   # Heatmap
-  heat_path <- file.path(results_dir, "temporal", paste0("gene_activity_heatmap_", cl, ".png"))
+  heat_path <- file.path(results_dir, "cross_temporal", paste0("gene_activity_heatmap_", cl, ".png"))
   if (file.exists(heat_path)) {
     heat_imgs[[cl]] <- base64encode(readBin(heat_path, "raw", file.info(heat_path)$size))
   }

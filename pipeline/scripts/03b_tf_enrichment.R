@@ -528,28 +528,6 @@ if (nrow(sig_tfs) > 0) {
            name              = "-log10(adj.p)")
   dev.off()
 
-  png(file.path(out_dir, "tf", "tf_enrichment_heatmap.png"),
-      width = plot_w, height = plot_h, units = "in", res = 150)
-  pheatmap(heat_mat,
-           annotation_row    = ann_row,
-           annotation_col    = ann_col,
-           annotation_colors = ann_colors_full,
-           cluster_rows      = (nrow(heat_mat) > 2),
-           cluster_cols      = (ncol(heat_mat) > 2),
-           display_numbers   = overlap_mat,
-           number_format     = "%s",
-           number_color      = "black",
-           fontsize_number   = 8,
-           color             = heat_colors,
-           breaks            = breaks,
-           main              = "TF Target Enrichment\nColor = -log10(adj.p), Numbers = overlap count",
-           fontsize          = 10,
-           fontsize_row      = 9,
-           fontsize_col      = 10,
-           border_color      = "grey80",
-           legend_breaks     = seq(0, ceiling(max_val), by = 1),
-           name              = "-log10(adj.p)")
-  dev.off()
   cat(sprintf("Saved tf_enrichment_heatmap.pdf / .png\n"))
 
   # --- 8c. Focused heatmaps per analysis dimension ---

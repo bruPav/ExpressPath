@@ -46,6 +46,15 @@ All in `results/<timestamp>/`:
 | `signif_lrt.tsv` | Genes with LRT padj < 0.05 |
 | `counts_matrix.tsv` | Filtered count matrix (DESeq2 input) |
 | `vst_normalized_counts.tsv` | VST-transformed counts |
+| `cross_temporal/persistence_classes.tsv` | Per-cell-line temporal persistence categories |
+| `cross_temporal/gene_activity.tsv` | Per-gene log2FC and significance at each timepoint |
+| `cross_temporal/venn_genelists.tsv` | DEG sets per cell line × timepoint (for Venn/UpSet) |
+| `cross_temporal/cross_cellline_shared.tsv` | Genes DE in both cell lines at each timepoint (concordance + magnitude divergence) |
+| `cross_temporal/cross_cellline_specific.tsv` | Genes DE in only one cell line at each timepoint |
+| `cross_cellline/cross_temporal_persistence.tsv` | Cross-cell-line temporal divergence categories |
+| `cross_cellline/cross_temporal_gene_activity.tsv` | Per-gene between-cell-line log2FC at each timepoint |
+| `cross_cellline/cross_temporal_shared.tsv` | Between-cell-line DEGs shared across timepoints |
+| `cross_cellline/cross_temporal_specific.tsv` | Between-cell-line DEGs specific to one timepoint |
 | `pathway/gsea_kegg_signif.tsv` | Enriched KEGG pathways (GSEA) |
 | `pathway/gsea_go_signif.tsv` | Enriched GO terms (GSEA) |
 | `pathway/gsva_scores.tsv` | Per-sample pathway activity scores |
@@ -69,6 +78,73 @@ data/design.yaml  +  data/your_data.tsv
 Contrasts are auto-generated from your experiment design — no hardcoded cell
 line or time point names. Add more time points or rename cell lines in
 `data/design.yaml` and everything adapts.
+
+## Analysis Categories
+
+The pipeline classifies DEGs into temporal activity categories at three levels:
+
+### Per-Cell-Line Temporal Persistence
+
+For each cell line, genes are classified by which treatment timepoints they are
+DE at (vs mock). Output in `cross_temporal/persistence_classes.tsv`.
+
+| Category | Meaning |
+|----------|---------|
+| `Transient` | DE only at the first treatment timepoint |
+| `Transient_Mid` | DE at a single intermediate timepoint |
+| `Secondary_Deferred` | DE only at the last treatment timepoint |
+| `Sustained` | DE at the first AND last treatment timepoints, with contiguous significance across all intermediate timepoints |
+| `Partially_Sustained` | DE contiguously from the first through an intermediate timepoint, but NOT at the last |
+| `Intermittent` | DE at the first AND last treatment timepoints, but with gaps (non-contiguous) |
+| `Complex` | Any other multi-timepoint pattern not fitting the above |
+
+### Cross-Cell-Line at Each Timepoint
+
+Compares DEG sets between two cell lines at each treatment timepoint.
+Output in `cross_temporal/cross_cellline_shared.tsv` and
+`cross_temporal/cross_cellline_specific.tsv`.
+
+| Category | Meaning |
+|----------|---------|
+| `Concordant_Up` | Both cell lines upregulated (same direction) |
+| `Concordant_Down` | Both cell lines downregulated (same direction) |
+| `Discordant` | One up, one down (labeled as `{CL}_Up_{CL}_Down`) |
+| `Magnitude Divergent` | Shared gene where \|log2FC ratio\| between cell lines > 2 |
+| `Cell-line-specific` | DE in one cell line only (absent from the other) |
+
+### Cross-Cell-Line Temporal Divergence (Part G)
+
+Classifies how the *between-cell-line difference* evolves over time. Uses the
+cell-line-vs-cell-line contrasts at each timepoint (e.g. E6 vs A549 at mock,
+1h, 3h). Output in `cross_cellline/cross_temporal_persistence.tsv`.
+
+| Category | Meaning |
+|----------|---------|
+| `Constitutive` | Between-cell-line difference significant at ALL timepoints |
+| `Baseline_Only` | Difference only at the reference timepoint (pre-existing, disappears after treatment) |
+| `Emergent_Early` | Difference appears only at the first treatment timepoint |
+| `Emergent_Mid` | Difference appears at a single mid-treatment timepoint |
+| `Emergent_Late` | Difference appears only at the last treatment timepoint |
+| `Emergent_Sustained` | Difference at ALL treatment timepoints but NOT at baseline — treatment-induced and persistent |
+| `Emergent_Complex` | Difference at multiple (but not all) treatment timepoints, not at baseline |
+| `Convergent` | Difference present at baseline but ABSENT by the last timepoint (cell lines become more similar) |
+| `Complex` | Any other multi-timepoint pattern |
+
+### DESeq2 Contrasts
+
+The statistical model `~ batch + cell_line + time + cell_line:time` produces four
+types of pairwise Wald contrasts, each gated by flags in `data/design.yaml`:
+
+| Comparison type | Flag | Example | What it tests |
+|----------------|------|---------|---------------|
+| Within cell line | `within_cell_line` | `A549_3h_vs_mock` | Treatment effect per cell line |
+| Progression | `progression` | `A549_3h_vs_1h` | Response evolution between consecutive timepoints |
+| Between cell lines | `between_cell_lines` | `E6_vs_A549_1h` | Cell line difference at each timepoint |
+| Interaction | `interactions` | `interaction_3h` | Does the time effect differ between cell lines? |
+
+An LRT (omnibus) test on `~ batch + cell_line + time + cell_line:time` vs.
+`~ batch + cell_line` identifies genes that change in any way across the
+experiment.
 
 ## Configuration
 
