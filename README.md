@@ -4,6 +4,10 @@ RNA-seq time course analysis pipeline — DESeq2 differential expression →
 temporal & cross-cell-line classification → GSEA pathway enrichment →
 TF enrichment → Pathview KEGG maps → interactive HTML report.
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Snakemake](https://img.shields.io/badge/powered%20by-snakemake-green.svg)](https://snakemake.github.io)
+[![Bioconductor](https://img.shields.io/badge/Bioconductor-4.3-0092AC.svg)](https://bioconductor.org)
+
 Metadata-driven. Single Snakemake command from raw counts to browsable results.
 
 ## Quick Start
