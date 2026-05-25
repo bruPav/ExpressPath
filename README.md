@@ -13,8 +13,8 @@ Metadata-driven. Single Snakemake command from raw counts to browsable results.
 3. Browse for your TSV file → map columns to samples
 4. Download `design.yaml` → save to `data/`
 5. Put your TSV file in `data/` (same name as shown in the GUI)
-6. `cd pipeline && snakemake -j4 --use-conda`
-7. Open `results/<timestamp>/pathway/interactive_report.html`
+6. Run `./run.sh` (add `-j8` for more cores, `-n` for dry-run)
+7. Open the report URL printed when the pipeline finishes
 
 ## Requirements
 
