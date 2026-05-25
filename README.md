@@ -1,7 +1,8 @@
 # ExpressPath
 
 RNA-seq time course analysis pipeline — DESeq2 differential expression →
-GSEA pathway enrichment → Pathview KEGG maps → interactive HTML report.
+temporal & cross-cell-line classification → GSEA pathway enrichment →
+TF enrichment → Pathview KEGG maps → interactive HTML report.
 
 Metadata-driven. Single Snakemake command from raw counts to browsable results.
 
@@ -60,6 +61,9 @@ All in `results/<timestamp>/`:
 | `pathway/gsva_scores.tsv` | Per-sample pathway activity scores |
 | `pathway/pathview_output/` | KEGG pathway maps with log2FC overlay |
 | `pathway/interactive_report.html` | Self-contained browsable report |
+| `tf/tf_enrichment_results.tsv` | TF target enrichment (enrichR) — all contrasts |
+| `tf/tf_enrichment_heatmap.pdf` | Heatmap of TF enrichment significance per analysis dimension |
+| `tf/tf_regulatory_network_*.html` | Per-cell-line / shared / divergence TF–target regulatory networks |
 
 ## How It Works
 
@@ -69,8 +73,15 @@ data/design.yaml  +  data/your_data.tsv
    [extract_counts]      Python — reads column_map from design
         │
    [deseq2_analysis]     R/DESeq2 — LRT + pairwise Wald contrasts
+        │                                     │
+        │                     ┌────────────────┘
+        │                     ▼
+        │              [temporal_mfuzz]  R/Mfuzz — clustering, persistence,
+        │                                     cross-cell-line comparisons
         │
    [pathway_analysis]    R/clusterProfiler — GSEA + Pathview + GSVA
+        │
+   [tf_enrichment]       R/enrichR — TF target enrichment + regulatory networks
         │
    [interactive_report]  R/htmltools — self-contained HTML report
 ```
