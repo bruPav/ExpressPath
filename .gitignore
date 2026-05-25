@@ -12,7 +12,17 @@ results/
 # Snakemake conda environments
 pipeline/.snakemake/
 
+# Snakemake run_id persistence (local state)
+pipeline/.snakemake_run_id
+
+# Local documentation
+pipeline/README_explanation.md
+
 # Python cache
 __pycache__/
 .~lock*
 *.Identifier
+
+# Personal presentations
+*.odp
+*.pptx
