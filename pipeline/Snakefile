@@ -128,7 +128,8 @@ rule all:
 # --- Step 1: Extract count matrix, metadata, gene annotations ---
 rule extract_counts:
     input:
-        tsv = input_tsv_path
+        tsv    = input_tsv_path,
+        script = "scripts/01_extract_counts.py"
     output:
         counts = counts_file,
         meta   = metadata_file,
@@ -148,7 +149,8 @@ rule deseq2_analysis:
     input:
         counts = counts_file,
         meta   = metadata_file,
-        annot  = annot_file
+        annot  = annot_file,
+        script = "scripts/02_deseq2_analysis.R"
     output:
         combined       = combined_file,
         signif         = signif_file,
@@ -184,7 +186,8 @@ rule deseq2_analysis:
 # --- Step 3: Pathway analysis (GSEA + Pathview + GSVA) ---
 rule pathway_analysis:
     input:
-        combined = combined_file
+        combined = combined_file,
+        script   = "scripts/03_pathway_analysis.R"
     output:
         gsea_kegg = gsea_kegg_file,
         gsea_go   = gsea_go_file,
@@ -207,7 +210,8 @@ rule tf_enrichment:
         ct_shared    = ct_shared_file,
         persist      = ct_persist_file,
         cc_persist   = cc_persist_file,
-        annot        = annot_file
+        annot        = annot_file,
+        script       = "scripts/03b_tf_enrichment.R"
     output:
         results  = tf_results_file,
         heat_pdf = tf_heatmap_pdf,
@@ -239,7 +243,8 @@ rule interactive_report:
         cc_venn        = cc_venn_file,
         cc_shared      = cc_shared_file,
         cc_specific    = cc_specific_file,
-        tf_results     = tf_results_file
+        tf_results     = tf_results_file,
+        script         = "scripts/04_interactive_report.R"
     output:
         report = report_file
     params:
