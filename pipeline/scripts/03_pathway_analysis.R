@@ -266,9 +266,13 @@ if (exists("gsea_kegg_sig") && nrow(gsea_kegg_sig) > 0) {
       gene_fc <- setNames(fc_df[[log2fc_col]], as.character(fc_df$entrez))
       gene_fc <- gene_fc[!duplicated(names(gene_fc))]
 
-      # Skip contrasts with very few meaningful fold changes
-      n_meaningful <- sum(abs(gene_fc) > 0.3)
-      if (n_meaningful < 5) next
+      padj_col <- paste0(pc, "_padj")
+      if (padj_col %in% names(combined)) {
+        padj_vals <- combined[[padj_col]][match(names(gene_fc), as.character(combined$entrez))]
+        gene_fc[is.na(padj_vals) | padj_vals >= 0.05] <- 0
+      }
+
+      if (sum(abs(gene_fc) > 0) < 1) next
 
       # Switch working directory so pathview writes images here
       setwd(cid_dir)

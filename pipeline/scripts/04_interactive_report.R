@@ -387,6 +387,11 @@ for (j in seq_len(nrow(gsea_kegg))) {
 # =============================================
 # 5. Generate missing Pathview maps
 # =============================================
+# Threshold summary for pathview maps:
+#   Map coloring:   padj < 0.05   -> colored (red/blue by log2FC sign)
+#                   padj >= 0.05  -> grey (log2FC forced to 0)
+#   Map generation: at least 1 gene with padj < 0.05 and non-zero log2FC
+#   Legend:         limit=list(gene=2) saturates |log2FC| >= 2 to max color
 cat("Checking/generating pathview maps...\n")
 
 # For each pathway, generate maps for contrasts where GSEA was significant
@@ -415,7 +420,13 @@ for (i in seq_len(nrow(pwy_stats))) {
     gene_fc <- setNames(fc_df[[log2fc_col]], as.character(fc_df$entrez))
     gene_fc <- gene_fc[!duplicated(names(gene_fc))]
 
-    if (sum(abs(gene_fc) > 0.3) < 5) next
+    padj_col <- paste0(ct, "_padj")
+    if (padj_col %in% names(combined)) {
+      padj_vals <- combined[[padj_col]][match(names(gene_fc), as.character(combined$entrez))]
+      gene_fc[is.na(padj_vals) | padj_vals >= 0.05] <- 0
+    }
+
+    if (sum(abs(gene_fc) > 0) < 1) next
 
     setwd(pv_dir)
     tryCatch({
@@ -485,6 +496,9 @@ entrez_to_info <- setNames(lapply(seq_len(nrow(combined)), function(i) list(
 )), combined$entrez)
 
 # --- Helper: build leading-edge gene table for a contrast ---
+# Gene table coloring:  log2FC > 0.3 -> red, < -0.3 -> blue, else grey
+# Row bold:             padj < 0.05 in this contrast
+# Gene source:          GSEA core_enrichment (max 20 genes)
 make_gene_table <- function(pid, ct) {
   core_key <- paste(pid, ct, sep = "/")
   core_entrez <- core_lookup[[core_key]]
@@ -586,6 +600,10 @@ make_pwy_card <- function(pid, pwy_lookup, img_cache) {
 
       first_tab <- FALSE
     }
+  }
+
+  if (first_tab) {
+    img_panels <- '<div class="alert alert-light small py-1 mb-0">No pathview map in any contrast &mdash; fewer than 1 gene with padj &lt; 0.05 and measurable fold change in this pathway.</div>'
   }
 
   baseline_html <- sprintf(
@@ -695,6 +713,17 @@ make_pwy_card <- function(pid, pwy_lookup, img_cache) {
               sapply(names(contrast_short), function(cn) {
                 sprintf('<b>%s</b>=%s &nbsp;', contrast_short[cn], contrast_labels[cn])
               }), collapse = " "))
+          )
+        ),
+        tags$details(
+          tags$summary("How to read this pathway card", style = "font-size:11px; color:#6c757d; cursor:pointer;"),
+          tags$div(class = "ms-3 mt-1 small text-muted",
+            tags$ul(style = "padding-left: 1.2rem;",
+              tags$li(HTML("<b>Map</b>: Only genes with padj &lt; 0.05 are colored (red = upregulated, blue = downregulated). Grey boxes = not significant.")),
+              tags$li(HTML("<b>Leading-edge table</b> (below map): The subset of genes that drove the GSEA enrichment signal. Row bold = individually DE in this contrast.")),
+              tags$li(HTML("<b>DE Genes</b> (expandable above left): All pathway member genes individually DE in at least one contrast category.")),
+              tags$li(HTML("These three gene lists answer different questions and will <em>not</em> be identical. A pathway can be GSEA-significant even when few individual genes pass padj &lt; 0.05."))
+            )
           )
         ),
         tags$ul(class = "nav nav-tabs mb-2", role = "tablist",
