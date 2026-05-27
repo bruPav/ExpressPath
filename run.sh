@@ -10,7 +10,6 @@ DATA_DIR="$SCRIPT_DIR/data"
 DESIGN_FILE="$DATA_DIR/design.yaml"
 DESIGN_EXAMPLE="$DATA_DIR/design.example.yaml"
 SETUP_HTML="$PIPELINE_DIR/setup_design.html"
-RUN_ID_FILE="$PIPELINE_DIR/.snakemake_run_id"
 
 RED=$'\033[0;31m'
 GREEN=$'\033[0;32m'
@@ -27,13 +26,11 @@ ${BOLD}Usage:${NC}
   ./run.sh [OPTIONS] [SNAKEMAKE_ARGS...]
 
 ${BOLD}Options:${NC}
-  --fresh      Delete run_id tracking file — next run creates a new output directory
   -h, --help   Show this help message
 
 ${BOLD}Examples:${NC}
   ./run.sh                       Run with 4 cores (default)
   ./run.sh -j8                   Run with 8 cores
-  ./run.sh -j8 --fresh           Run with 8 cores, new output directory
   ./run.sh -n                    Dry-run (show what would run)
   ./run.sh --forcerun deseq2_analysis   Re-run just DESeq2 step
 
@@ -165,16 +162,11 @@ print(d.get('source_tsv', ''))
 
 # ─── Main ─────────────────────────────────────────────────────
 
-FRESH=false
 SNAKEMAKE_ARGS=(-j4)
 
 # Parse run.sh own flags; everything else passed to snakemake
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --fresh)
-            FRESH=true
-            shift
-            ;;
         -h|--help)
             usage
             exit 0
@@ -198,14 +190,6 @@ echo -e "\n${BOLD}Checking experiment design:${NC}"
 check_design
 check_tsv
 
-# Fresh run
-if $FRESH; then
-    if [ -f "$RUN_ID_FILE" ]; then
-        rm "$RUN_ID_FILE"
-        echo -e "\n${YELLOW}--fresh: removed run_id tracking file → new output directory${NC}"
-    fi
-fi
-
 # Run snakemake
 echo -e "\n${BOLD}Running snakemake:${NC}"
 echo "  cd pipeline && snakemake --use-conda ${SNAKEMAKE_ARGS[*]}"
@@ -215,8 +199,9 @@ cd "$PIPELINE_DIR"
 snakemake --use-conda "${SNAKEMAKE_ARGS[@]}"
 
 # Show result path
-if [ -f "$RUN_ID_FILE" ]; then
-    run_id=$(cat "$RUN_ID_FILE")
+run_dir=$(ls -dt "$SCRIPT_DIR/results"/*/ 2>/dev/null | head -1 || true)
+if [ -n "$run_dir" ]; then
+    run_id=$(basename "$run_dir")
     echo -e "\n${GREEN}${BOLD}✓ Pipeline complete${NC}"
     echo -e "  Report: ${CYAN}results/$run_id/pathway/interactive_report.html${NC}"
     echo -e "  Output: ${CYAN}results/$run_id/${NC}"

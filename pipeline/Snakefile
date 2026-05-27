@@ -35,15 +35,8 @@ if not os.path.exists(input_tsv_path):
 
 # --- Resolve run_id ---
 run_id_raw = config.get("run_id", "auto")
-run_id_file = ".snakemake_run_id"
 if run_id_raw == "auto":
-    if os.path.exists(run_id_file):
-        with open(run_id_file) as f:
-            run_id = f.read().strip()
-    else:
-        run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-        with open(run_id_file, "w") as f:
-            f.write(run_id)
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
 else:
     run_id = run_id_raw
 
