@@ -1632,9 +1632,11 @@ if (length(cl_ids) >= 2 && length(tp_ids) >= 2) {
         )
 
         # Gene activity row
+        venn_group <- paste(sort(tps_present), collapse = "+")
         gsym <- combined$gene_symbol[match(gene, combined$gene_id)]
         row <- data.frame(gene_id = gene, gene_symbol = gsym, pair = pair_key,
-                          category = category, stringsAsFactors = FALSE)
+                          category = category, venn_group = venn_group,
+                          stringsAsFactors = FALSE)
         for (tp in tp_order) {
           lfc_v  <- if (gene %in% names(ct_lfc_vals[[tp]])) ct_lfc_vals[[tp]][gene] else NA
           padj_v <- if (gene %in% names(ct_padj_vals[[tp]])) ct_padj_vals[[tp]][gene] else NA
@@ -1855,25 +1857,19 @@ if (length(cl_ids) >= 2 && length(tp_ids) >= 2) {
             )
           }
 
-          a_only <- setdiff(deg_a, deg_b)
-          b_only <- setdiff(deg_b, deg_a)
-          for (g in a_only) {
-            lfc <- ct_lfc_vals[[tp_a]][g]
+        }
+
+        for (tp in tp_order) {
+          others <- setdiff(tp_order, tp)
+          deg_others <- unique(unlist(ct_deg_sets[others]))
+          tp_only <- setdiff(ct_deg_sets[[tp]], deg_others)
+          for (g in tp_only) {
+            lfc <- ct_lfc_vals[[tp]][g]
             sym <- combined$gene_symbol[match(g, combined$gene_id)]
             dir <- if (!is.na(lfc) && lfc > 0) "Up" else if (!is.na(lfc) && lfc < 0) "Down" else "Zero"
             cross_tspecific_rows[[length(cross_tspecific_rows) + 1]] <- data.frame(
-              gene_id = g, gene_symbol = sym, pair = pair_key, timepoint = tp_a,
-              log2FC = round(lfc, 4), padj = round(ct_padj_vals[[tp_a]][g], 6),
-              direction = dir, stringsAsFactors = FALSE
-            )
-          }
-          for (g in b_only) {
-            lfc <- ct_lfc_vals[[tp_b]][g]
-            sym <- combined$gene_symbol[match(g, combined$gene_id)]
-            dir <- if (!is.na(lfc) && lfc > 0) "Up" else if (!is.na(lfc) && lfc < 0) "Down" else "Zero"
-            cross_tspecific_rows[[length(cross_tspecific_rows) + 1]] <- data.frame(
-              gene_id = g, gene_symbol = sym, pair = pair_key, timepoint = tp_b,
-              log2FC = round(lfc, 4), padj = round(ct_padj_vals[[tp_b]][g], 6),
+              gene_id = g, gene_symbol = sym, pair = pair_key, timepoint = tp,
+              log2FC = round(lfc, 4), padj = round(ct_padj_vals[[tp]][g], 6),
               direction = dir, stringsAsFactors = FALSE
             )
           }
@@ -2082,6 +2078,7 @@ if (length(cl_ids) >= 2 && length(tp_ids) >= 2) {
                 sep = "\t", row.names = FALSE, quote = FALSE)
     write.table(data.frame(gene_id = character(), gene_symbol = character(),
                             pair = character(), category = character(),
+                            venn_group = character(),
                             stringsAsFactors = FALSE),
                 file = file.path(out_dir, "cross_cellline", "cross_temporal_gene_activity.tsv"),
                 sep = "\t", row.names = FALSE, quote = FALSE)
