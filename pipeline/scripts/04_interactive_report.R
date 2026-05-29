@@ -391,7 +391,7 @@ for (j in seq_len(nrow(gsea_kegg))) {
 #   Map coloring:   padj < 0.05   -> colored (red/blue by log2FC sign)
 #                   padj >= 0.05  -> grey (log2FC forced to 0)
 #   Map generation: at least 1 gene with padj < 0.05 and non-zero log2FC
-#   Legend:         limit=list(gene=2) saturates |log2FC| >= 2 to max color
+#   Legend:         limit=list(gene=1) saturates |log2FC| >= 1 to max color
 cat("Checking/generating pathview maps...\n")
 
 # For each pathway, generate maps for contrasts where GSEA was significant
@@ -433,7 +433,7 @@ for (i in seq_len(nrow(pwy_stats))) {
       suppressMessages(
         pathview(gene.data = gene_fc, pathway.id = pid, species = "hsa",
                  gene.idtype = "ENTREZ", kegg.dir = pv_cache,
-                 out.suffix = suffix, limit = list(gene = 2, cpd = 1),
+                  out.suffix = suffix, limit = list(gene = 1, cpd = 1),
                  low = list(gene = "blue", cpd = "blue"),
                  mid = list(gene = "grey", cpd = "grey"),
                  high = list(gene = "red", cpd = "yellow"),

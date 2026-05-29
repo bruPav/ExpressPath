@@ -282,7 +282,7 @@ if (exists("gsea_kegg_sig") && nrow(gsea_kegg_sig) > 0) {
       tryCatch({
         pathview(gene.data = gene_fc, pathway.id = cid, species = "hsa",
                  gene.idtype = "ENTREZ", kegg.dir = pathview_dir,
-                 out.suffix = out_suffix, limit = list(gene = 2, cpd = 1),
+                 out.suffix = out_suffix, limit = list(gene = 1, cpd = 1),
                  low = list(gene = "blue", cpd = "blue"),
                  mid = list(gene = "grey", cpd = "grey"),
                  high = list(gene = "red", cpd = "yellow"),
