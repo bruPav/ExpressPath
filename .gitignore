@@ -6,8 +6,12 @@ data/*.tsv
 # Working design (track the example instead)
 data/design.yaml
 
+# GEO cache (derived data)
+data/geo_cache/
+
 # Generated output
 results/
+plots/
 
 # Snakemake conda environments
 pipeline/.snakemake/
