@@ -13,6 +13,9 @@ data/geo_cache/
 results/
 plots/
 
+# Standalone analysis scripts (not pipeline)
+scripts/
+
 # Snakemake conda environments
 pipeline/.snakemake/
 
