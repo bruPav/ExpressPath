@@ -1,12 +1,6 @@
-# Large data files
-data/rnaseq_samples.tsv
-data/test_samplesheet.tsv
+# Data files
 data/*.tsv
-
-# Working design (track the example instead)
 data/design.yaml
-
-# GEO cache (derived data)
 data/geo_cache/
 
 # Generated output
@@ -16,20 +10,17 @@ plots/
 # Standalone analysis scripts (not pipeline)
 scripts/
 
-# Snakemake conda environments
+# Snakemake state
 pipeline/.snakemake/
-
-# Snakemake run_id persistence (local state)
 pipeline/.snakemake_run_id
 
 # Local documentation
-pipeline/README_explanation.md
+pipeline/README_*.md
 
 # Python cache
-__pycache__/
-.~lock*
+**/__pycache__/
+**/.~lock*
 *.Identifier
 
 # Personal presentations
-*.odp
-*.pptx
+*.{odp,pptx}
