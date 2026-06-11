@@ -44,7 +44,7 @@ else:
 count_filter_val  = config.get("count_filter_threshold", 10)
 pvalue_val        = config.get("pvalue_threshold", 0.05)
 temporal_n_clus   = config.get("temporal_n_clusters", 6)
-temporal_fc_thr   = config.get("temporal_foldchange_threshold", 1)
+temporal_fc_thr   = config.get("temporal_foldchange_threshold", 0)
 gsea_min_val      = config.get("gsea_min_set_size", 15)
 gsea_max_val      = config.get("gsea_max_set_size", 500)
 enrichr_dbs       = config.get("enrichr_databases", [

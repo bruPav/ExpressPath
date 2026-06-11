@@ -24,6 +24,16 @@ Metadata-driven. Single Snakemake command from raw counts to browsable results.
 6. Run `./run.sh` (add `-j8` for more cores, `-n` for dry-run)
 7. Open the report URL printed when the pipeline finishes
 
+Or skip the GUI and edit `data/design.example.yaml` by hand:
+```bash
+cp data/design.example.yaml data/design.yaml
+# tweak cell lines, time points, and column_map, then:
+./run.sh
+```
+
+For a detailed explanation of every output file, QC plots, analysis
+decisions, and troubleshooting, see [`pipeline/README_explanation.md`](pipeline/README_explanation.md).
+
 ## Requirements
 
 - conda (or mamba)
@@ -51,10 +61,10 @@ All in `results/<timestamp>/`:
 
 | File | Description |
 |------|-------------|
-| `combined_results.tsv` | All genes — LRT p-values + all pairwise log2FC and padj |
-| `signif_lrt.tsv` | Genes with LRT padj < 0.05 |
-| `counts_matrix.tsv` | Filtered count matrix (DESeq2 input) |
-| `vst_normalized_counts.tsv` | VST-transformed counts |
+| `tables/combined_results.tsv` | All genes — LRT p-values + all pairwise log2FC and padj |
+| `tables/signif_lrt.tsv` | Genes with LRT padj < 0.05 |
+| `tables/counts_matrix.tsv` | Filtered count matrix (DESeq2 input) |
+| `tables/vst_normalized_counts.tsv` | VST-transformed counts |
 | `cross_temporal/persistence_classes.tsv` | Per-cell-line temporal persistence categories |
 | `cross_temporal/gene_activity.tsv` | Per-gene log2FC and significance at each timepoint |
 | `cross_temporal/venn_genelists.tsv` | DEG sets per cell line × timepoint (for Venn/UpSet) |
@@ -73,6 +83,17 @@ All in `results/<timestamp>/`:
 | `tf/tf_enrichment_heatmap.pdf` | Heatmap of TF enrichment significance per analysis dimension |
 | `tf/tf_regulatory_network_*.html` | Per-cell-line / shared / divergence TF–target regulatory networks |
 
+Directory naming note: `cross_temporal/` holds treatment-response analyses
+(within-cell-line and cross-cell-line at each timepoint), while
+`cross_cellline/` holds between-cell-line temporal divergence analyses. Files
+within each directory carry the opposite prefix (e.g.,
+`cross_cellline/cross_temporal_persistence.tsv`) — this is intentional: it
+reflects the analysis dimension applied within that context.
+
+`pathview_output/` PNGs and `tf_regulatory_network_*.html` files are generated
+as side outputs by the R scripts and are not tracked by Snakemake rules; newer
+pipeline runs overwrite them in place.
+
 ## How It Works
 
 ```
@@ -80,12 +101,9 @@ data/design.yaml  +  data/your_data.tsv
         │
    [extract_counts]      Python — reads column_map from design
         │
-   [deseq2_analysis]     R/DESeq2 — LRT + pairwise Wald contrasts
-        │                                     │
-        │                     ┌────────────────┘
-        │                     ▼
-        │              [temporal_mfuzz]  R/Mfuzz — clustering, persistence,
-        │                                     cross-cell-line comparisons
+   [deseq2_analysis]     R/DESeq2 — LRT + pairwise Wald contrasts,
+        │                   Mfuzz clustering, temporal persistence,
+        │                   cross-cell-line comparisons
         │
    [pathway_analysis]    R/clusterProfiler — GSEA + Pathview + GSVA
         │

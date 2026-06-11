@@ -16,6 +16,10 @@ pipeline/.snakemake_run_id
 
 # Local documentation
 pipeline/README_*.md
+Presentations/
+analysis/
+sn-article-template/
+texput.log
 
 # Python cache
 **/__pycache__/
