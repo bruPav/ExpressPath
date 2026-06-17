@@ -45,13 +45,14 @@ if not column_map:
 # Build COUNT_COLUMNS from explicit map
 COUNT_COLUMNS = []
 for col_name, info in column_map.items():
-    sid   = info.get("sample_id", f"{info['cell_line']}_{info['time']}_{info['replicate']}")
+    sid   = info.get("sample_id", f"{info['cell_line']}_{info['time']}_{info.get('treatment', 'treated')}_{info['replicate']}")
     batch = info.get("batch", f"batch_{info['replicate']}")
     COUNT_COLUMNS.append((
         col_name,
         sid,
         info["cell_line"],
         info["time"],
+        info.get("treatment", "treated"),
         str(info["replicate"]),
         batch
     ))
@@ -93,11 +94,12 @@ def main():
 
     # Build metadata rows
     metadata_rows = []
-    for col_name, sample_id, cell_line, time_point, rep, batch in COUNT_COLUMNS:
+    for col_name, sample_id, cell_line, time_point, treatment, rep, batch in COUNT_COLUMNS:
         metadata_rows.append({
             "sample_id": sample_id,
             "cell_line": cell_line,
             "time": time_point,
+            "treatment": treatment,
             "replicate": rep,
             "batch": batch,
         })
@@ -169,7 +171,7 @@ def main():
     meta_path = os.path.join(out_dir, "metadata.tsv")
     with open(meta_path, "w", newline="") as f:
         writer = csv.DictWriter(f, delimiter="\t",
-                                fieldnames=["sample_id", "cell_line", "time", "replicate", "batch"])
+                                fieldnames=["sample_id", "cell_line", "time", "treatment", "replicate", "batch"])
         writer.writeheader()
         writer.writerows(metadata_rows)
     print(f"Wrote metadata -> {meta_path}")

@@ -1,6 +1,7 @@
 # ─── RNA-Seq Time Course Analysis Pipeline ───
 # Design-driven: setup your experiment with setup_design.html
 # Output: DESeq2 results + GSEA pathway analysis + interactive HTML report
+# Supports mock-as-treatment paired-control design with multiple treatments per timepoint
 
 # ─── Experiment Design ───
 design: "../data/design.yaml"                        # Path to your design file (set by setup_design.html)
@@ -17,9 +18,6 @@ pvalue_threshold: 0.05                               # alpha for significance
 # ─── Temporal Analysis ───
 temporal_n_clusters: 6                               # Number of Mfuzz clusters ("auto" for automatic)
 temporal_foldchange_threshold: 0                     # |log2FC| threshold for persistence/Venn classification (0 disables)
-
-# ─── Cross-Cell-Line Temporal Analysis ───
-cross_temporal_analysis: true                        # Run inverse cross → temporal persistence on between-cell-line contrasts
 
 # ─── GSEA ───
 gsea_min_set_size: 15                                # Min genes in a KEGG pathway

@@ -88,27 +88,31 @@ if (nrow(cross_shared) > 0) {
   gene_sets[["Shared_Down"]] <- shared_down_genes
 }
 
-# 3b. Per cell_line × persistence category
+# 3b. Per cell_line × treatment × persistence category
 if (nrow(persist_df) > 0) {
   for (cl in unique(persist_df$cell_line)) {
+    for (trt in unique(persist_df$treatment)) {
     for (cat_val in unique(persist_df$category)) {
-      set_name <- paste0(cl, "_", cat_val)
+      set_name <- paste0(cl, "_", trt, "_", cat_val)
       gene_sets[[set_name]] <- persist_df$gene_id[
-        persist_df$cell_line == cl & persist_df$category == cat_val
+        persist_df$cell_line == cl & persist_df$treatment == trt & persist_df$category == cat_val
       ]
+    }
     }
   }
 }
 
-# 3c. Cross-Sustained: genes where ALL cell lines have "Sustained"
+# 3c. Cross-Sustained: genes where ALL cell lines have "Sustained" per treatment
 if (nrow(persist_df) > 0) {
   cl_list <- unique(persist_df$cell_line)
   if (length(cl_list) >= 2) {
+    for (trt in unique(persist_df$treatment)) {
     sustained_per_cl <- lapply(cl_list, function(cl) {
-      persist_df$gene_id[persist_df$cell_line == cl & persist_df$category == "Sustained"]
+      persist_df$gene_id[persist_df$cell_line == cl & persist_df$treatment == trt & persist_df$category == "Sustained"]
     })
     cross_sustained <- Reduce(intersect, sustained_per_cl)
-    gene_sets[["Cross_Sustained"]] <- cross_sustained
+    gene_sets[[paste0("Cross_Sustained_", trt)]] <- cross_sustained
+    }
   }
 }
 
@@ -301,8 +305,8 @@ combined_expr <- read.table(file.path(out_dir, "tables", "combined_results.tsv")
                             quote = "", fill = TRUE, comment.char = "")
 
 # Dynamically discover all {cell_line}_{timepoint}_vs_mock comparisons
-lfc_cols  <- grep("_vs_mock_log2FC$", colnames(combined_expr), value = TRUE)
-padj_cols <- grep("_vs_mock_padj$",  colnames(combined_expr), value = TRUE)
+lfc_cols  <- grep("_vs_.*_log2FC$", colnames(combined_expr), value = TRUE)
+padj_cols <- grep("_vs_.*_padj$",  colnames(combined_expr), value = TRUE)
 cat(sprintf("Found %d comparisons in combined_results\n", length(lfc_cols)))
 
 # Clean TF name → gene symbol (first word before any space/suffix)

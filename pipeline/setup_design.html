@@ -56,20 +56,17 @@ tr.unmatched select { border-color: #dc2626; }
       </div>
       <div class="field">
         <label>Time points (comma-separated)</label>
-        <input type="text" id="timePoints" value="mock, 1h, 3h" placeholder="e.g. mock, 30m, 1h, 3h, 6h" oninput="populateRefSelects()">
-        <small>Enter in chronological order (earliest → latest). Position in list determines temporal order.</small>
+        <input type="text" id="timePoints" value="1h, 3h, 8h, 16h, 24h" placeholder="e.g. 1h, 3h, 8h, 16h, 24h" oninput="populateRefSelects()">
+        <small>Enter in chronological order. Position determines temporal order.</small>
       </div>
       <div class="field">
-        <label>Treatment ID (column prefix)</label>
-        <input type="text" id="treatId" value="Ad26" placeholder="e.g. IFNg">
-      </div>
-      <div class="field">
-        <label>Treatment label</label>
-        <input type="text" id="treatLabel" value="Ad26" placeholder="e.g. Interferon-gamma">
+        <label>Treatments (comma-separated)</label>
+        <input type="text" id="treatments" value="mock, Ad26, Ad26-vector" placeholder="e.g. mock, IFNg, DrugX" oninput="populateRefSelects()">
+        <small>First treatment is the reference/control.</small>
       </div>
       <div class="field">
         <label>Replicates</label>
-        <input type="number" id="replicates" value="3" min="1" max="20" style="width:70px">
+        <input type="number" id="replicates" value="2" min="1" max="20" style="width:70px">
       </div>
     </div>
     <div class="row">
@@ -78,8 +75,8 @@ tr.unmatched select { border-color: #dc2626; }
         <select id="refCellLine" style="min-width:180px"><option value="">--</option></select>
       </div>
       <div class="field">
-        <label>Reference time point (baseline)</label>
-        <select id="refTimePoint" style="min-width:220px"><option value="">--</option></select>
+        <label>Reference treatment (control)</label>
+        <select id="refTreatment" style="min-width:220px"><option value="">--</option></select>
       </div>
     </div>
   </div>
@@ -118,7 +115,7 @@ tr.unmatched select { border-color: #dc2626; }
     <div class="scroll-table">
       <table id="mappingTable">
         <thead><tr>
-          <th>#</th><th>Cell Line</th><th>Time</th><th>Rep</th>
+          <th>#</th><th>Cell Line</th><th>Time</th><th>Treatment</th><th>Rep</th>
           <th>TSV Column</th><th>Batch</th><th>Sample ID</th>
         </tr></thead>
         <tbody></tbody>
@@ -164,25 +161,26 @@ function parseList(str) { return str.split(',').map(s => s.trim()).filter(s => s
 function populateRefSelects() {
   const cls = parseList(document.getElementById('cellLines').value);
   const tps = parseList(document.getElementById('timePoints').value);
+  const trts = parseList(document.getElementById('treatments').value);
   const refCl = document.getElementById('refCellLine');
-  const refTp = document.getElementById('refTimePoint');
+  const refTrt = document.getElementById('refTreatment');
   const prevCl = refCl.value;
-  const prevTp = refTp.value;
-  refCl.innerHTML = cls.map(c => `<option value="${c}">${c}</option>`).join('');
-  refTp.innerHTML = tps.map(t => `<option value="${t}">${t}</option>`).join('');
+  const prevTrt = refTrt.value;
+  refCl.innerHTML = cls.map(c => '<option value="'+c+'">'+c+'</option>').join('');
+  refTrt.innerHTML = trts.map(t => '<option value="'+t+'">'+t+'</option>').join('');
   if (cls.includes(prevCl)) refCl.value = prevCl;
-  if (tps.includes(prevTp)) refTp.value = prevTp;
+  if (trts.includes(prevTrt)) refTrt.value = prevTrt;
 }
 
 function getDesign() {
+  const trts = parseList(document.getElementById('treatments').value);
   return {
     cellLines: parseList(document.getElementById('cellLines').value),
     timePoints: parseList(document.getElementById('timePoints').value),
-    treatId: document.getElementById('treatId').value.trim(),
-    treatLabel: document.getElementById('treatLabel').value.trim(),
+    treatments: trts,
     replicates: parseInt(document.getElementById('replicates').value) || 3,
     refCellLine: document.getElementById('refCellLine').value,
-    refTimePoint: document.getElementById('refTimePoint').value
+    refTreatment: document.getElementById('refTreatment').value || trts[0]
   };
 }
 
@@ -213,32 +211,31 @@ function generateTable() {
 
   for (const cl of d.cellLines) {
     for (const tp of d.timePoints) {
+      for (const trt of d.treatments) {
       for (let rep = 1; rep <= d.replicates; rep++) {
         rowIdx++;
-        const isMock = (tp === d.timePoints[0]);
-        const autoId = isMock
-          ? `${cl}_${tp}_${rep}`
-          : `${cl}_${d.treatId}_${tp}_${rep}`;
+        const autoId = `${cl}_${tp}_${trt}_${rep}`;
 
         // Keyword-based auto-match
-        const keywords = [cl, tp, d.treatId, String(rep)].map(k => k.toLowerCase());
+        const keywords = [cl, tp, trt, String(rep)].map(k => k.toLowerCase());
         let bestI = -1, bestScore = 0;
         dataCols.forEach((c, i) => {
           const lower = c.toLowerCase();
           let score = 0;
-          if (lower.includes(keywords[0])) score += 2;  // cell line match = strong
-          if (lower.includes(keywords[1])) score += 2;  // time match = strong
-          if (!isMock && lower.includes(keywords[2])) score += 1;  // treatment match
-          if (lower.includes(keywords[3])) score += 1;  // rep match
+          if (lower.includes(keywords[0])) score += 2;
+          if (lower.includes(keywords[1])) score += 2;
+          if (lower.includes(keywords[2])) score += 2;
+          if (lower.includes(keywords[3])) score += 1;
           if (score > bestScore) { bestScore = score; bestI = i; }
         });
-        // Need at least 3 score to auto-match (cell+time+something)
-        const matchIdx = bestScore >= 3 ? bestI : -1;
+        // Need at least 4 score to auto-match (cl+tp+trt+some)
+        const matchIdx = bestScore >= 4 ? bestI : -1;
 
         const tr = document.createElement('tr');
         tr.dataset.rowIdx = rowIdx;
         tr.dataset.cellLine = cl;
         tr.dataset.time = tp;
+        tr.dataset.treatment = trt;
         tr.dataset.rep = rep;
 
         let dropdownHTML = '<select class="col-select"><option value="">??? — select column</option>';
@@ -251,6 +248,7 @@ function generateTable() {
           <td>${rowIdx}</td>
           <td><b>${cl}</b></td>
           <td>${tp}</td>
+          <td>${trt}</td>
           <td>${rep}</td>
           <td>${dropdownHTML}</td>
           <td><input type="text" class="batch-input" value="" placeholder="batch name"></td>
@@ -287,8 +285,8 @@ function autoFill() {
     const tr = sel.closest('tr');
     const cl = tr.dataset.cellLine.toLowerCase();
     const tp = tr.dataset.time.toLowerCase();
+    const trt = tr.dataset.treatment.toLowerCase();
     const rep = tr.dataset.rep;
-    const isMock = (tr.dataset.time === d.timePoints[0]);
 
     let bestI = -1, bestScore = 0;
     for (let i = 0; i < sel.options.length; i++) {
@@ -298,11 +296,11 @@ function autoFill() {
       let score = 0;
       if (lower.includes(cl)) score += 2;
       if (lower.includes(tp)) score += 2;
-      if (!isMock && lower.includes(d.treatId.toLowerCase())) score += 1;
+      if (lower.includes(trt)) score += 2;
       if (lower.includes(String(rep))) score += 1;
       if (score > bestScore) { bestScore = score; bestI = i; }
     }
-    if (bestI > 0 && bestScore >= 3) {
+    if (bestI > 0 && bestScore >= 4) {
       sel.selectedIndex = bestI;
       used.add(sel.value);
       tr.classList.remove('unmatched');
@@ -333,9 +331,11 @@ function updateValidation() {
   const selects = document.querySelectorAll('.col-select');
   const used = new Set();
   let unfilled = 0;
-  const mockStatus = {};
+  const trtSeen = {};
 
-  for (const cl of d.cellLines) mockStatus[cl] = false;
+  for (const cl of d.cellLines) {
+    for (const trt of d.treatments) trtSeen[cl + '_' + trt] = false;
+  }
 
   selects.forEach(sel => {
     const tr = sel.closest('tr');
@@ -346,9 +346,7 @@ function updateValidation() {
       unfilled++;
       tr.classList.add('unmatched');
     }
-    if (tr.dataset.time === (d.refTimePoint || d.timePoints[0])) {
-      mockStatus[tr.dataset.cellLine] = mockStatus[tr.dataset.cellLine] || !!sel.value;
-    }
+    trtSeen[tr.dataset.cellLine + '_' + tr.dataset.treatment] = trtSeen[tr.dataset.cellLine + '_' + tr.dataset.treatment] || !!sel.value;
   });
 
   const duplicates = [];
@@ -390,7 +388,7 @@ function updateValidation() {
     if (cls === 'ok') cls = 'warn';
   }
 
-  if (!html) html = '<p>✓ All slots filled, all batches set, mock present per cell line. Ready to download.</p>';
+  if (!html) html = '<p>✓ All slots filled, all batches set. Ready to download.</p>';
 
   div.className = 'validation ' + cls;
   div.innerHTML = html;
@@ -443,21 +441,27 @@ function downloadDesign() {
     columnMap[sel.value] = {
       cell_line: tr.dataset.cellLine,
       time: tr.dataset.time,
+      treatment: tr.dataset.treatment,
       replicate: parseInt(tr.dataset.rep),
       sample_id: sampleId,
       batch: batch
     };
   });
 
-  const refTp = d.refTimePoint || d.timePoints[0];
+  const refTrt = d.refTreatment || d.treatments[0];
 
   const clList = d.cellLines.map(c => {
-    return {id: c, short: (/mock/i.test(c) ? 'm' : c[0].toUpperCase())};
+    return {id: c, short: c.includes('-') ? c.split('-').map(p => p[0].toUpperCase()).join('') : c[0].toUpperCase()};
   });
 
   const tpList = d.timePoints.map((t, i) => {
-    const s = t === refTp ? 'm' : (t[0]);
+    const s = t[0];
     return {id: t, label: t, short: s, temporal_order: i + 1};
+  });
+
+  const trtList = d.treatments.map(t => {
+    const s = t[0].toUpperCase();
+    return {id: t, label: t, short: s};
   });
 
   const design = {
@@ -465,15 +469,16 @@ function downloadDesign() {
     factors: {
       cell_lines: clList,
       time_points: tpList,
-      treatment: {id: d.treatId, label: d.treatLabel},
+      treatments: trtList,
+      reference_treatment: refTrt,
       replicates: d.replicates,
-      reference_cell_line: d.refCellLine || d.cellLines[0],
-      reference_time_point: d.refTimePoint || d.timePoints[0]
+      reference_cell_line: d.refCellLine || d.cellLines[0]
     },
     column_map: columnMap,
     comparisons: {
-      within_cell_line: true,
+      treatment_vs_control: true,
       progression: true,
+      between_treatments: true,
       between_cell_lines: true,
       interactions: true
     }

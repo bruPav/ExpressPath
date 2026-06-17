@@ -222,11 +222,9 @@ cat("\n=== Part 2: Pathview ===\n")
 
 # Select key contrasts for pathview (auto-pick: between-cell-line + first/last time contrasts)
 pathview_contrasts <- intersect(c(
-  grep("_vs_", contrasts, value = TRUE),            # between-cell-line contrasts
-  grep("_vs_mock$", contrasts, value = TRUE),       # time vs mock
-  grep("interaction_", contrasts, value = TRUE)     # interactions
+  grep("_vs_", contrasts, value = TRUE),
+  grep("interaction_", contrasts, value = TRUE)
 ), contrasts)
-# Limit to max 7 contrasts (keep the most interesting ones)
 if (length(pathview_contrasts) > 7) pathview_contrasts <- head(pathview_contrasts, 7)
 
 # Get top KEGG pathways across all significant enrichments
@@ -316,9 +314,10 @@ cat("\n=== Part 3: GSVA ===\n")
 metadata <- read.delim(file.path(results_dir, "tables", "metadata.tsv"),
                        stringsAsFactors = FALSE)
 rownames(metadata) <- metadata$sample_id
-metadata$cell_line <- factor(metadata$cell_line)
-metadata$time <- factor(metadata$time)
-metadata$group <- factor(paste(metadata$cell_line, metadata$time, sep = "_"))
+metadata$cell_line  <- factor(metadata$cell_line)
+metadata$time       <- factor(metadata$time)
+metadata$treatment  <- factor(metadata$treatment)
+metadata$group      <- factor(paste(metadata$cell_line, metadata$time, metadata$treatment, sep = "_"))
 
 # Load VST counts
 cat("Loading VST counts...\n")
@@ -370,30 +369,35 @@ cat("Testing differential pathway activity...\n")
 # Auto-generate tests from metadata factors
 cl_levs <- levels(metadata$cell_line)
 tp_levs <- levels(metadata$time)
+trt_levs <- levels(metadata$treatment)
 ref_cl <- design$factors$reference_cell_line %||% cl_levs[1]
-nonref_cl <- if (length(cl_levs) >= 2) setdiff(cl_levs, ref_cl)[1] else NA_character_
-ref_tp <- design$factors$reference_time_point %||% tp_levs[1]
-nonref_tps <- setdiff(tp_levs, ref_tp)
+ref_trt <- design$factors$reference_treatment %||% trt_levs[1]
+nonref_trts <- setdiff(trt_levs, ref_trt)
 
 diff_tests <- list()
-# Within-cell-line: each cell × each nonref time vs ref time
+# Within-cell-line treatment vs control: each cell × each time × each non-ref treatment
 for (cl in cl_levs) {
-  for (tp in nonref_tps) {
-    tname <- paste0(cl, "_", tp, "_vs_", ref_tp)
-    diff_tests[[tname]] <- list(
-      samples_a = metadata$sample_id[metadata$cell_line == cl & metadata$time == tp],
-      samples_b = metadata$sample_id[metadata$cell_line == cl & metadata$time == ref_tp]
-    )
+  for (tp in tp_levs) {
+    for (trt in nonref_trts) {
+      tname <- paste0(cl, "_", tp, "_", trt, "_vs_", ref_trt)
+      diff_tests[[tname]] <- list(
+        samples_a = metadata$sample_id[metadata$cell_line == cl & metadata$time == tp & metadata$treatment == trt],
+        samples_b = metadata$sample_id[metadata$cell_line == cl & metadata$time == tp & metadata$treatment == ref_trt]
+      )
+    }
   }
 }
-# Between cell lines: at every timepoint (not just ref + last)
+# Between cell lines: at every timepoint × treatment
 if (length(cl_levs) >= 2) {
+  nonref_cl <- setdiff(cl_levs, ref_cl)[1]
   for (tp in tp_levs) {
-    tname <- paste0(nonref_cl, "_vs_", ref_cl, "_", tp)
-    diff_tests[[tname]] <- list(
-      samples_a = metadata$sample_id[metadata$cell_line == nonref_cl & metadata$time == tp],
-      samples_b = metadata$sample_id[metadata$cell_line == ref_cl & metadata$time == tp]
-    )
+    for (trt in trt_levs) {
+      tname <- paste0(nonref_cl, "_vs_", ref_cl, "_", tp, "_", trt)
+      diff_tests[[tname]] <- list(
+        samples_a = metadata$sample_id[metadata$cell_line == nonref_cl & metadata$time == tp & metadata$treatment == trt],
+        samples_b = metadata$sample_id[metadata$cell_line == ref_cl & metadata$time == tp & metadata$treatment == trt]
+      )
+    }
   }
 }
 
