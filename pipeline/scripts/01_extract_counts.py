@@ -69,13 +69,20 @@ ANNOTATION_COLUMNS = [
 
 
 def main():
+    # Detect delimiter (supports TSV and CSV)
+    with open(input_tsv, "r") as f:
+        sample = f.read(8192)
+        f.seek(0)
+        dialect = csv.Sniffer().sniff(sample)
+        delim = dialect.delimiter
+
     # Read header
     with open(input_tsv, "r") as f:
-        reader = csv.DictReader(f, delimiter="\t")
+        reader = csv.DictReader(f, delimiter=delim)
         header = list(reader.fieldnames)
 
-    # First column is the gene identifier (may have any name)
-    gene_id_col = header[0]
+    # First column is the gene identifier (prefer "#ID", fall back to first column)
+    gene_id_col = "#ID" if "#ID" in header else header[0]
 
     # Verify all count columns from column_map exist in TSV
     count_col_names = [c[0] for c in COUNT_COLUMNS]
@@ -108,7 +115,7 @@ def main():
     gene_order  = []
 
     with open(input_tsv, "r") as f:
-        reader = csv.DictReader(f, delimiter="\t")
+        reader = csv.DictReader(f, delimiter=delim)
         for row in reader:
             gene_id = row.get(gene_id_col, "").strip()
             symbol  = row.get("gene_name", "").strip()

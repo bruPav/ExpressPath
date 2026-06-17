@@ -151,7 +151,8 @@ document.getElementById('tsvFile').addEventListener('change', function(e) {
   const reader = new FileReader();
   reader.onload = function(ev) {
     const firstLine = ev.target.result.split('\n')[0];
-    tsvColumns = firstLine.split('\t').map(c => c.trim()).filter(c => c);
+    let delim = firstLine.split('\t').length > 1 ? '\t' : ',';
+    tsvColumns = firstLine.split(delim).map(c => c.trim()).filter(c => c);
   };
   reader.readAsBinaryString(file.slice(0, 1024 * 10)); // read first 10KB only
 });
@@ -195,7 +196,7 @@ function generateTable() {
   }
 
   // Build dropdown options from all data-like TSV columns (no suffix assumption)
-  const metaCols = new Set(["gene_name", "nr_symbol", ""]);
+  const metaCols = new Set(["gene_name", "nr_symbol", "", "#ID"]);
   let dataCols = [];
   if (tsvColumns.length) {
     dataCols = tsvColumns.filter(c => !c.endsWith('_FPKM') && !metaCols.has(c));

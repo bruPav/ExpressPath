@@ -115,11 +115,17 @@ all_contrasts <- unique(gsub("_log2FC$", "",
 cat(sprintf("  %d contrasts found\n", length(all_contrasts)))
 
 # Dynamic key contrast names (used in DE gene breakdown)
-nonref_cl  <- setdiff(cl_ids, ref_cl)[1]
+nonref_cl  <- if (length(cl_ids) >= 2) setdiff(cl_ids, ref_cl)[1] else NA_character_
 nonref_tps <- setdiff(tp_ids, ref_tp)
-mock_btw_col <- paste0(nonref_cl, "_vs_", ref_cl, "_", ref_tp)
-mock_padj_col <- paste0(mock_btw_col, "_padj")
-mock_lfc_col  <- paste0(mock_btw_col, "_log2FC")
+if (length(cl_ids) >= 2) {
+  mock_btw_col <- paste0(nonref_cl, "_vs_", ref_cl, "_", ref_tp)
+  mock_padj_col <- paste0(mock_btw_col, "_padj")
+  mock_lfc_col  <- paste0(mock_btw_col, "_log2FC")
+} else {
+  mock_btw_col <- NA_character_
+  mock_padj_col <- NA_character_
+  mock_lfc_col  <- NA_character_
+}
 
 # Auto-generate labels and short names
 contrast_labels <- setNames(sapply(all_contrasts, function(cn) {
@@ -256,18 +262,24 @@ for (i in seq_len(nrow(pwy_stats))) {
     apply(members[, time_cl1_cols, drop = FALSE], 1, function(x) any(x < 0.05, na.rm = TRUE))
   else rep(FALSE, nrow(members))
 
-  time_cl2_cols <- grep(paste0("^", nonref_cl, "_(", paste(nonref_tps, collapse="|"), ")_vs_"), names(members), value = TRUE)
-  time_e6_de <- if (length(time_cl2_cols) > 0)
-    apply(members[, time_cl2_cols, drop = FALSE], 1, function(x) any(x < 0.05, na.rm = TRUE))
-  else rep(FALSE, nrow(members))
+  time_cl2_de <- if (length(cl_ids) >= 2) {
+    time_cl2_cols <- grep(paste0("^", nonref_cl, "_(", paste(nonref_tps, collapse="|"), ")_vs_"), names(members), value = TRUE)
+    if (length(time_cl2_cols) > 0)
+      apply(members[, time_cl2_cols, drop = FALSE], 1, function(x) any(x < 0.05, na.rm = TRUE))
+    else rep(FALSE, nrow(members))
+  } else rep(FALSE, nrow(members))
 
   # Between/Interaction DE
-  btwn_regex <- paste0("^", nonref_cl, "_vs_", ref_cl, "_(", paste(nonref_tps, collapse = "|"),
-                       ")_padj$|^interaction_(", paste(nonref_tps, collapse="|"), ")_padj$")
-  btwn_de_cols <- grep(btwn_regex, names(members), value = TRUE)
-  btwn_de <- if (length(btwn_de_cols) > 0)
-    apply(members[, btwn_de_cols, drop = FALSE], 1, function(x) any(x < 0.05, na.rm = TRUE))
-  else rep(FALSE, nrow(members))
+  if (length(cl_ids) >= 2) {
+    btwn_regex <- paste0("^", nonref_cl, "_vs_", ref_cl, "_(", paste(nonref_tps, collapse = "|"),
+                         ")_padj$|^interaction_(", paste(nonref_tps, collapse="|"), ")_padj$")
+    btwn_de_cols <- grep(btwn_regex, names(members), value = TRUE)
+    btwn_de <- if (length(btwn_de_cols) > 0)
+      apply(members[, btwn_de_cols, drop = FALSE], 1, function(x) any(x < 0.05, na.rm = TRUE))
+    else rep(FALSE, nrow(members))
+  } else {
+    btwn_de <- rep(FALSE, nrow(members))
+  }
 
   # 4 mutually exclusive categories
   n_bsl_only  <- sum( mock_de & !time_de & !btwn_de, na.rm = TRUE)
@@ -315,9 +327,9 @@ for (i in seq_len(nrow(pwy_stats))) {
     if (is.na(sym) || sym == "--" || sym == "") sym <- members$gene_id[j]
     m <- if (mock_de[j]) "✓" else ""
     a <- if (time_a549_de[j]) "✓" else ""
-    e <- if (time_e6_de[j]) "✓" else ""
+    e <- if (time_cl2_de[j]) "✓" else ""
     b <- if (btwn_de[j]) "✓" else ""
-    n <- mock_de[j] + time_a549_de[j] + time_e6_de[j] + btwn_de[j]
+    n <- mock_de[j] + time_a549_de[j] + time_cl2_de[j] + btwn_de[j]
     de_table_rows <- c(de_table_rows,
       sprintf('<tr><td><b>%s</b></td><td class="text-center">%s</td><td class="text-center">%s</td><td class="text-center">%s</td><td class="text-center">%s</td><td class="text-end">%d</td></tr>',
               sym, m, a, e, b, n))

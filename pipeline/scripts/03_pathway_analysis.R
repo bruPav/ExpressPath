@@ -371,7 +371,7 @@ cat("Testing differential pathway activity...\n")
 cl_levs <- levels(metadata$cell_line)
 tp_levs <- levels(metadata$time)
 ref_cl <- design$factors$reference_cell_line %||% cl_levs[1]
-nonref_cl <- setdiff(cl_levs, ref_cl)[1]
+nonref_cl <- if (length(cl_levs) >= 2) setdiff(cl_levs, ref_cl)[1] else NA_character_
 ref_tp <- design$factors$reference_time_point %||% tp_levs[1]
 nonref_tps <- setdiff(tp_levs, ref_tp)
 

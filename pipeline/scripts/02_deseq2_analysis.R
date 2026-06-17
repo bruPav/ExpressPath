@@ -92,7 +92,7 @@ ref_tp     <- f$reference_time_point %||% tp_ids[1]
 # Reorder so reference is first (DESeq2 uses first level as baseline)
 cl_ids     <- c(ref_cl, setdiff(cl_ids, ref_cl))
 tp_ids     <- c(ref_tp, setdiff(tp_ids, ref_tp))
-nonref_cl  <- setdiff(cl_ids, ref_cl)[1]
+nonref_cl  <- if (length(cl_ids) >= 2) setdiff(cl_ids, ref_cl)[1] else NA_character_
 nonref_tps <- setdiff(tp_ids, ref_tp)
 
 metadata$cell_line <- factor(metadata$cell_line, levels = cl_ids)
@@ -103,18 +103,25 @@ metadata$group     <- factor(paste(metadata$cell_line, metadata$time, sep = "_")
 rownames(metadata) <- metadata$sample_id
 
 # --- 2. Build DESeq2 object ---
+if (length(cl_ids) >= 2) {
+  design_formula <- ~ batch + cell_line + time + cell_line:time
+  design_label   <- "~ batch + cell_line + time + cell_line:time"
+} else {
+  design_formula <- ~ batch + time
+  design_label   <- "~ batch + time"
+}
 dds <- DESeqDataSetFromMatrix(countData = counts,
                                colData = metadata,
-                               design = ~ batch + cell_line + time + cell_line:time)
+                               design = design_formula)
 
-cat(sprintf("\nDesign: ~ batch + cell_line + time + cell_line:time\n"))
+cat(sprintf("\nDesign: %s\n", design_label))
 cat(sprintf("  cell_lines: %s (ref: %s)\n", paste(cl_ids, collapse=", "), ref_cl))
 cat(sprintf("  time_points: %s (ref: %s)\n", paste(tp_ids, collapse=", "), ref_tp))
 
 # --- 3. Part A: LRT ---
 cat("\n=== Part A: Likelihood Ratio Test ===\n")
 
-dds_lrt <- DESeq(dds, test = "LRT", reduced = ~ batch + cell_line)
+dds_lrt <- DESeq(dds, test = "LRT", reduced = if (length(cl_ids) >= 2) ~ batch + cell_line else ~ batch)
 res_lrt <- results(dds_lrt, alpha = alpha_val)
 res_lrt <- res_lrt[order(res_lrt$pvalue), ]
 
@@ -137,15 +144,21 @@ for (tp in nonref_tps) {
   cat(sprintf("  time %s: %s\n", tp, coef_time[[tp]]))
 }
 
-# Cell line main effect
-coef_cell_line <- grep(paste0("cell_line_?", nonref_cl), coef_names, value = TRUE)[1]
+# Cell line main effect (only meaningful with 2+ cell lines)
+coef_cell_line <- if (length(cl_ids) >= 2) {
+  grep(paste0("cell_line_?", nonref_cl), coef_names, value = TRUE)[1]
+} else NA_character_
 cat(sprintf("  cell_line %s: %s\n", nonref_cl, coef_cell_line))
 
-# Interaction terms
+# Interaction terms (only meaningful with 2+ cell lines)
 coef_int <- list()
 for (tp in nonref_tps) {
-  pat <- paste0("cell.line.*", nonref_cl, ".*\\.time", ".*", tp)
-  coef_int[[tp]] <- grep(pat, coef_names, value = TRUE)[1]
+  if (length(cl_ids) >= 2) {
+    pat <- paste0("cell.line.*", nonref_cl, ".*\\.time", ".*", tp)
+    coef_int[[tp]] <- grep(pat, coef_names, value = TRUE)[1]
+  } else {
+    coef_int[[tp]] <- NA_character_
+  }
   cat(sprintf("  interact %s: %s\n", tp, coef_int[[tp]] %||% "(none)"))
 }
 
@@ -223,7 +236,7 @@ if (isTRUE(comp$progression) && length(nonref_tps) >= 2) {
 }
 
 # --- Between cell lines: {cl2}_vs_{cl1} at each time ---
-if (isTRUE(comp$between_cell_lines)) {
+if (isTRUE(comp$between_cell_lines) && length(cl_ids) >= 2) {
   cat("\n-- Between cell lines --\n")
   for (tp in tp_ids) {
     if (tp == ref_tp) {
@@ -251,7 +264,7 @@ if (isTRUE(comp$between_cell_lines)) {
 }
 
 # --- Interactions: differential time response ---
-if (isTRUE(comp$interactions)) {
+if (isTRUE(comp$interactions) && length(cl_ids) >= 2) {
   cat("\n-- Interaction (differential response) --\n")
   for (tp in nonref_tps) {
     cname <- paste0("interaction_", tp)
@@ -305,8 +318,12 @@ for (cname in names(contrast_list)) {
 }
 
 # Add mock_is_DE flag
-combined$mock_is_DE <- combined[[paste0(nonref_cl, "_vs_", ref_cl, "_", ref_tp, "_padj")]] < alpha_val
-combined$mock_is_DE[is.na(combined$mock_is_DE)] <- FALSE
+if (length(cl_ids) >= 2) {
+  combined$mock_is_DE <- combined[[paste0(nonref_cl, "_vs_", ref_cl, "_", ref_tp, "_padj")]] < alpha_val
+  combined$mock_is_DE[is.na(combined$mock_is_DE)] <- FALSE
+} else {
+  combined$mock_is_DE <- FALSE
+}
 
 # Merge annotations (rename gene_id to match)
 colnames(annotations)[1] <- "gene_id"
@@ -363,8 +380,10 @@ for (cname in names(contrast_list)) {
   cat(sprintf("  %-30s %6d sig  (up: %5d, down: %5d)\n", cname, n_sig, n_up, n_dn))
 }
 
-cat(sprintf("\nBaseline differences (mock_is_DE): %d genes differ at mock (padj < %.2g)\n",
-            sum(combined$mock_is_DE, na.rm = TRUE), alpha_val))
+if (length(cl_ids) >= 2) {
+  cat(sprintf("\nBaseline differences (mock_is_DE): %d genes differ at mock (padj < %.2g)\n",
+              sum(combined$mock_is_DE, na.rm = TRUE), alpha_val))
+}
 
 # --- 7. Visualizations ---
 cat("\n=== Creating Plots ===\n")
@@ -443,10 +462,14 @@ volcano_contrasts <- names(contrast_list)
 volcano_contrasts <- intersect(
   c(grep(paste0("^", ref_cl, "_", nonref_tps[1]), names(contrast_list), value = TRUE),
     grep(paste0("^", ref_cl, "_", tail(nonref_tps, 1)), names(contrast_list), value = TRUE),
-    grep(paste0("^", nonref_cl, "_", nonref_tps[1]), names(contrast_list), value = TRUE),
-    grep(paste0("^", nonref_cl, "_", tail(nonref_tps, 1)), names(contrast_list), value = TRUE),
-    grep(paste0(nonref_cl, "_vs_", ref_cl, "_mock"), names(contrast_list), value = TRUE),
-    grep("^interaction_", names(contrast_list), value = TRUE)[1]),
+    if (length(cl_ids) >= 2)
+      grep(paste0("^", nonref_cl, "_", nonref_tps[1]), names(contrast_list), value = TRUE),
+    if (length(cl_ids) >= 2)
+      grep(paste0("^", nonref_cl, "_", tail(nonref_tps, 1)), names(contrast_list), value = TRUE),
+    if (length(cl_ids) >= 2)
+      grep(paste0(nonref_cl, "_vs_", ref_cl, "_mock"), names(contrast_list), value = TRUE),
+    if (length(cl_ids) >= 2)
+      grep("^interaction_", names(contrast_list), value = TRUE)[1]),
   names(contrast_list))
 volcano_contrasts <- na.omit(volcano_contrasts)
 if (length(volcano_contrasts) > 6) volcano_contrasts <- head(volcano_contrasts, 6)
