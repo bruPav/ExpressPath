@@ -104,22 +104,27 @@ metadata$group      <- factor(paste(metadata$cell_line, metadata$time, metadata$
 rownames(metadata) <- metadata$sample_id
 
 # --- 2. Build DESeq2 object ---
-design_formula <- ~ batch + group
+batch_nlevels <- length(unique(metadata$batch))
+if (batch_nlevels >= 2) {
+  design_formula <- ~ batch + group
+  reduced_formula <- ~ batch
+} else {
+  design_formula <- ~ group
+  reduced_formula <- ~ 1
+}
 dds <- DESeqDataSetFromMatrix(countData = counts,
                                colData = metadata,
                                design = design_formula)
 
-cat(sprintf("\nDesign: ~ batch + group\n"))
+cat(sprintf("\nDesign: %s\n", if (batch_nlevels >= 2) "~ batch + group" else "~ group (batch constant, dropped)"))
 cat(sprintf("  cell_lines: %s (ref: %s)\n", paste(cl_ids, collapse=", "), ref_cl))
 cat(sprintf("  time_points: %s\n", paste(tp_ids, collapse=", ")))
 cat(sprintf("  treatments: %s (ref: %s)\n", paste(trt_ids, collapse=", "), ref_trt))
-cat(sprintf("  groups: %d (%s)\n", nlevels(metadata$group),
-            paste(levels(metadata$group)[1:min(6, nlevels(metadata$group))], collapse=", ")))
 
 # --- 3. Part A: LRT ---
 cat("\n=== Part A: Likelihood Ratio Test ===\n")
 
-dds_lrt <- DESeq(dds, test = "LRT", reduced = ~ batch)
+dds_lrt <- DESeq(dds, test = "LRT", reduced = reduced_formula)
 res_lrt <- results(dds_lrt, alpha = alpha_val)
 res_lrt <- res_lrt[order(res_lrt$pvalue), ]
 
@@ -542,6 +547,10 @@ if (length(lrt_signif_genes) >= 10) {
       tp_matrix <- do.call(cbind, tp_means)
       colnames(tp_matrix) <- names(tp_means)
 
+      # Remove NA/NaN/Inf and zero-variance rows (inactive genes)
+      keep_rows <- apply(tp_matrix, 1, function(r) all(is.finite(r)) && sd(r, na.rm = TRUE) > 0)
+      tp_matrix <- tp_matrix[keep_rows, , drop = FALSE]
+
       if (nrow(tp_matrix) < 10 || ncol(tp_matrix) < 2) {
         cat(sprintf("  %s: too few genes or timepoints, skipping\n", tag))
         next
@@ -889,13 +898,28 @@ if (length(tp_ids) >= 2) {
         lfc_cols <- grep("^log2FC_", names(cl_act_df), value = TRUE)
         lfc_mat <- as.matrix(cl_act_df[, lfc_cols, drop = FALSE])
         lfc_mat[is.na(lfc_mat)] <- 0
-        rownames(lfc_mat) <- ifelse(is.na(cl_act_df$gene_symbol) | cl_act_df$gene_symbol == "--" | cl_act_df$gene_symbol == "",
-                                    cl_act_df$gene_id, cl_act_df$gene_symbol)
+        rownames(lfc_mat) <- make.unique(ifelse(is.na(cl_act_df$gene_symbol) | cl_act_df$gene_symbol == "--" | cl_act_df$gene_symbol == "",
+                                                  cl_act_df$gene_id, cl_act_df$gene_symbol))
         colnames(lfc_mat) <- sub("^log2FC_", "", lfc_cols)
 
         cat_colors <- c("Transient" = "#4DAF4A", "Sustained" = "#FF7F00",
                         "Secondary_Deferred" = "#377EB8", "Partially_Sustained" = "#984EA3",
                         "Transient_Mid" = "#F781BF", "Complex" = "#999999")
+
+        # Top 12 genes per persistence category for readable heatmap
+        cl_act_df$max_abs_lfc <- apply(abs(lfc_mat), 1, max, na.rm = TRUE)
+        cl_act_df <- cl_act_df %>%
+          dplyr::group_by(category) %>%
+          dplyr::slice_max(order_by = max_abs_lfc, n = 12, with_ties = FALSE,
+                           na_rm = TRUE) %>%
+          dplyr::ungroup()
+        cl_act_df <- cl_act_df[order(cl_act_df$category, -cl_act_df$max_abs_lfc), ]
+        cl_act_df$max_abs_lfc <- NULL
+        lfc_mat <- as.matrix(cl_act_df[, lfc_cols, drop = FALSE])
+        lfc_mat[is.na(lfc_mat)] <- 0
+        rownames(lfc_mat) <- make.unique(ifelse(is.na(cl_act_df$gene_symbol) | cl_act_df$gene_symbol == "--" | cl_act_df$gene_symbol == "",
+                                                  cl_act_df$gene_id, cl_act_df$gene_symbol))
+
         ann_row <- data.frame(Category = cl_act_df$category, row.names = rownames(lfc_mat))
         ann_colors <- list(Category = cat_colors[intersect(names(cat_colors), unique(cl_act_df$category))])
 

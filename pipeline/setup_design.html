@@ -212,7 +212,7 @@ function generateTable() {
   for (const cl of d.cellLines) {
     for (const tp of d.timePoints) {
       for (const trt of d.treatments) {
-      for (let rep = 1; rep <= d.replicates; rep++) {
+        for (let rep = 1; rep <= d.replicates; rep++) {
         rowIdx++;
         const autoId = `${cl}_${tp}_${trt}_${rep}`;
 
@@ -257,6 +257,7 @@ function generateTable() {
 
         if (matchIdx === -1) tr.classList.add('unmatched');
         tbody.appendChild(tr);
+        }
       }
     }
   }

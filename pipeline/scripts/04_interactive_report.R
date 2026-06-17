@@ -488,9 +488,6 @@ make_gene_table <- function(pid, ct) {
     lfc     <- combined[[log2fc_col]][r]
     padj    <- combined[[padj_col]][r]
     is_de   <- !is.na(padj) && padj < 0.05
-    # Baseline DE status
-    mock_col <- if (mock_padj_col %in% names(combined)) combined[[mock_padj_col]][r] else NA
-    mock_de <- !is.na(mock_col) && mock_col < 0.05
 
     bold_span <- if (is_de) ' class="fw-bold"' else ""
     lfc_color <- if (!is.na(lfc)) {
@@ -498,18 +495,17 @@ make_gene_table <- function(pid, ct) {
     } else "grey"
     padj_str <- if (is.na(padj)) "NA" else format(padj, digits = 2, scientific = TRUE)
     lfc_str  <- if (is.na(lfc)) "NA" else sprintf("%+.2f", lfc)
-    mock_str <- if (mock_de) '<span class="text-primary">&#10003;</span>' else ""
 
     gene_rows <- c(gene_rows, sprintf(
-      '<tr%s><td>%s</td><td style="color:%s">%s</td><td>%s</td><td>%s</td></tr>',
-      bold_span, symbol, lfc_color, lfc_str, padj_str, mock_str))
+      '<tr%s><td>%s</td><td style="color:%s">%s</td><td>%s</td></tr>',
+      bold_span, symbol, lfc_color, lfc_str, padj_str))
     if (length(gene_rows) >= 20) break
   }
   if (length(gene_rows) == 0) return("")
 
-  sprintf('<div class="mt-2"><small class="text-muted fw-bold">Leading-edge genes (DESeq2 padj < 0.05 shown bold, &#10003; = also DE at baseline):</small>
+  sprintf('<div class="mt-2"><small class="text-muted fw-bold">Leading-edge genes (DESeq2 padj < 0.05 shown bold):</small>
 <table class="table table-sm table-borderless small mb-0" style="font-size:11px">
-<thead><tr><th>Gene</th><th>log2FC</th><th>padj</th><th>BaseDE</th></tr></thead><tbody>%s</tbody></table></div>',
+<thead><tr><th>Gene</th><th>log2FC</th><th>padj</th></tr></thead><tbody>%s</tbody></table></div>',
     paste(gene_rows, collapse = "\n"))
 }
 

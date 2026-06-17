@@ -72,10 +72,11 @@ ANNOTATION_COLUMNS = [
 def main():
     # Detect delimiter (supports TSV and CSV)
     with open(input_tsv, "r") as f:
-        sample = f.read(8192)
+        first = f.readline()
         f.seek(0)
-        dialect = csv.Sniffer().sniff(sample)
-        delim = dialect.delimiter
+    tab_count = len(first.split('\t'))
+    comma_count = len(first.split(','))
+    delim = '\t' if tab_count > comma_count else ','
 
     # Read header
     with open(input_tsv, "r") as f:
