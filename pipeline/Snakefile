@@ -103,13 +103,20 @@ tf_heatmap_pdf   = f"{tf_dir}/tf_enrichment_heatmap.pdf"
 tf_heatmap_png   = f"{tf_dir}/tf_enrichment_heatmap.png"
 
 # Pathway
-gsea_kegg_file = f"{pathway_dir}/gsea_kegg_signif.tsv"
-gsea_go_file   = f"{pathway_dir}/gsea_go_signif.tsv"
-gsva_file      = f"{pathway_dir}/gsva_scores.tsv"
-gsva_diff_file = f"{pathway_dir}/gsva_diff_results.tsv"
-gsea_dotplot   = f"{pathway_dir}/gsea_dotplot_kegg.pdf"
-gsva_dotplot   = f"{pathway_dir}/gsva_diff_dotplot.pdf"
-report_file    = f"{pathway_dir}/interactive_report.html"
+gsea_kegg_file     = f"{pathway_dir}/gsea_kegg_signif.tsv"
+gsea_go_file       = f"{pathway_dir}/gsea_go_signif.tsv"
+gsea_hallmark_file = f"{pathway_dir}/gsea_hallmark_signif.tsv"
+gsea_reactome_file = f"{pathway_dir}/gsea_reactome_signif.tsv"
+gsea_custom_file   = f"{pathway_dir}/gsea_custom_signif.tsv"
+gsva_file          = f"{pathway_dir}/gsva_scores.tsv"
+gsva_summary_file  = f"{pathway_dir}/gsva_contrast_summary.tsv"
+gsea_dotplot_kegg  = f"{pathway_dir}/gsea_dotplot_kegg.png"
+gsea_dotplot_go    = f"{pathway_dir}/gsea_dotplot_go.png"
+gsea_dotplot_hall  = f"{pathway_dir}/gsea_dotplot_hallmark.png"
+gsea_dotplot_react = f"{pathway_dir}/gsea_dotplot_reactome.png"
+gsea_dotplot_cust  = f"{pathway_dir}/gsea_dotplot_custom.png"
+gsva_heatmap       = f"{pathway_dir}/gsva_sample_heatmap.png"
+report_file        = f"{pathway_dir}/interactive_report.html"
 
 # --- Default target ---
 rule all:
@@ -184,10 +191,17 @@ rule pathway_analysis:
     output:
         gsea_kegg = gsea_kegg_file,
         gsea_go   = gsea_go_file,
+        gsea_hall = gsea_hallmark_file,
+        gsea_react = gsea_reactome_file,
+        gsea_custom = gsea_custom_file,
         gsva      = gsva_file,
-        gsva_diff = gsva_diff_file,
-        gsea_dp   = gsea_dotplot,
-        gsva_dp   = gsva_dotplot
+        gsva_summary = gsva_summary_file,
+        gsea_dp_kegg  = gsea_dotplot_kegg,
+        gsea_dp_go    = gsea_dotplot_go,
+        gsea_dp_hall  = gsea_dotplot_hall,
+        gsea_dp_react = gsea_dotplot_react,
+        gsea_dp_cust  = gsea_dotplot_cust,
+        gsva_heat     = gsva_heatmap
     params:
         design = design_json
     conda:
@@ -223,6 +237,17 @@ rule interactive_report:
         combined       = combined_file,
         gsea_kegg      = gsea_kegg_file,
         gsea_go        = gsea_go_file,
+        gsea_hall      = gsea_hallmark_file,
+        gsea_react     = gsea_reactome_file,
+        gsea_custom    = gsea_custom_file,
+        gsva           = gsva_file,
+        gsva_summary   = gsva_summary_file,
+        gsea_dp_kegg   = gsea_dotplot_kegg,
+        gsea_dp_go     = gsea_dotplot_go,
+        gsea_dp_hall   = gsea_dotplot_hall,
+        gsea_dp_react  = gsea_dotplot_react,
+        gsea_dp_cust   = gsea_dotplot_cust,
+        gsva_heat      = gsva_heatmap,
         cluster        = ct_cluster_file,
         cluster_p      = ct_cluster_prof,
         velocity       = ct_velocity_file,

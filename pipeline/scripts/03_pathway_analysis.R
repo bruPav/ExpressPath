@@ -1,7 +1,8 @@
 #!/usr/bin/env Rscript
 #
-# Pathway analysis: GSEA + Pathview + GSVA
-# For all 11 contrasts from DESeq2 time-course analysis
+# Pathway analysis: GSEA (KEGG, GO BP, Hallmark, Reactome, custom) + Pathview + GSVA
+# Data-driven: all gene-set collections are built from MSigDB or a GMT file;
+# no contrasts, timepoints, or cell lines are hard-coded.
 #
 
 # ─── Snakemake integration ───
@@ -37,15 +38,17 @@ suppressPackageStartupMessages({
   library("pheatmap")
   library("dplyr")
   library("msigdbr")
+  library("RColorBrewer")
 })
 
-cat("=== Pathview Analysis: GSEA + Pathview + GSVA ===\n")
+cat("=== Pathway Analysis: GSEA + Pathview + GSVA ===\n")
 cat(sprintf("Results dir: %s\n", results_dir))
 cat(sprintf("Pathway dir: %s\n", out_dir))
 
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 pathview_dir <- normalizePath(file.path(out_dir, "pathview_maps"), mustWork = FALSE)
 dir.create(pathview_dir, showWarnings = FALSE, recursive = TRUE)
+
 # --- Load DESeq2 results ---
 cat("\nLoading DESeq2 combined results...\n")
 combined <- read.delim(file.path(results_dir, "tables", "combined_results.tsv"),
@@ -59,7 +62,6 @@ id_map <- bitr(ensg_ids, fromType = "ENSEMBL", toType = "ENTREZID",
                OrgDb = org.Hs.eg.db)
 cat(sprintf("  %d of %d genes mapped to ENTREZ\n", nrow(id_map), length(ensg_ids)))
 
-# Add ENTREZ to combined table
 combined$entrez <- id_map$ENTREZID[match(combined$gene_id, id_map$ENSEMBL)]
 
 # --- Define contrasts (read from combined_results column names) ---
@@ -69,178 +71,252 @@ contrasts <- unique(gsub("_log2FC$", "",
 cat(sprintf("  %d contrasts found\n", length(contrasts)))
 
 # ==============================
-# Part 1: GSEA (KEGG + GO) for all contrasts
+# Part 1: Build ranked gene lists
 # ==============================
-cat("\n=== Part 1: GSEA ===\n")
+cat("\n=== Part 1: Build ranked lists ===\n")
 
 set.seed(42)
+EPS <- 1e-10
 
-gsea_kegg_all <- list()
-gsea_go_all <- list()
+ranked_lists <- list()
 
 for (cname in contrasts) {
   log2fc_col <- paste0(cname, "_log2FC")
   pval_col   <- paste0(cname, "_pvalue")
 
-  if (!log2fc_col %in% names(combined)) {
-    cat(sprintf("  SKIP %s: columns not found\n", cname))
-    next
-  }
-
-  cat(sprintf("  %-30s ", cname))
+  if (!log2fc_col %in% names(combined) || !pval_col %in% names(combined)) next
 
   df <- combined[, c("gene_id", "entrez", log2fc_col, pval_col)]
   df <- df[!is.na(df$entrez) & !is.na(df[[log2fc_col]]) & !is.na(df[[pval_col]]), ]
+  if (nrow(df) < 10) next
 
-  if (nrow(df) < 10) { cat("too few genes\n"); next }
-
-  # Rank: -log10(pvalue) * sign(log2FC)
-  df$rank_stat <- -log10(df[[pval_col]]) * sign(df[[log2fc_col]])
+  # Cap p-values away from zero to avoid Inf ranks
+  pvals <- pmax(df[[pval_col]], EPS)
+  df$rank_stat <- -log10(pvals) * sign(df[[log2fc_col]])
   df <- df[order(df$rank_stat, decreasing = TRUE), ]
 
   gene_list <- setNames(df$rank_stat, df$entrez)
   gene_list <- gene_list[!duplicated(names(gene_list))]
-
-  # --- KEGG GSEA ---
-  kegg_res <- tryCatch({
-    gseKEGG(geneList = gene_list, organism = "hsa", pvalueCutoff = 0.05,
-            minGSSize = gsea_min, maxGSSize = gsea_max, eps = 0, seed = 42)
-  }, error = function(e) { cat("KEGG-err "); NULL })
-
-  if (!is.null(kegg_res) && nrow(kegg_res@result) > 0) {
-    kr <- kegg_res@result
-    kr$contrast <- cname
-    gsea_kegg_all[[cname]] <- kr
-    cat(sprintf("KEGG:%d ", sum(kr$p.adjust < 0.05)))
-  } else {
-    cat("KEGG:0 ")
-  }
-
-  # --- GO BP GSEA ---
-  go_res <- tryCatch({
-    gseGO(geneList = gene_list, OrgDb = org.Hs.eg.db, ont = "BP",
-          pvalueCutoff = 0.05, minGSSize = gsea_min, maxGSSize = gsea_max,
-          eps = 0, seed = 42)
-  }, error = function(e) { cat("GO-err "); NULL })
-
-  if (!is.null(go_res) && nrow(go_res@result) > 0) {
-    gr <- go_res@result
-    gr$contrast <- cname
-    gsea_go_all[[cname]] <- gr
-    cat(sprintf("GO:%d", sum(gr$p.adjust < 0.05)))
-  } else {
-    cat("GO:0")
-  }
-  cat("\n")
-}
-
-# --- Combine and save ---
-cat("\nSaving GSEA results...\n")
-
-if (length(gsea_kegg_all) > 0) {
-  gsea_kegg_combined <- do.call(rbind, gsea_kegg_all)
-  write.table(gsea_kegg_combined,
-              file = file.path(out_dir, "gsea_kegg_all.tsv"),
-              sep = "\t", row.names = FALSE, quote = FALSE)
-  cat(sprintf("  gsea_kegg_all.tsv: %d rows\n", nrow(gsea_kegg_combined)))
-
-  gsea_kegg_sig <- gsea_kegg_combined[gsea_kegg_combined$p.adjust < 0.05, ]
-  write.table(gsea_kegg_sig,
-              file = file.path(out_dir, "gsea_kegg_signif.tsv"),
-              sep = "\t", row.names = FALSE, quote = FALSE)
-  cat(sprintf("  gsea_kegg_signif.tsv: %d significant enrichments\n",
-              nrow(gsea_kegg_sig)))
-} else {
-  write.table(data.frame(ID = character(), Description = character(),
-    setSize = integer(), enrichmentScore = numeric(), NES = numeric(),
-    pvalue = numeric(), p.adjust = numeric(), qvalue = numeric(),
-    rank = numeric(), leading_edge = character(), core_enrichment = character(),
-    contrast = character(), stringsAsFactors = FALSE),
-    file = file.path(out_dir, "gsea_kegg_signif.tsv"),
-    sep = "\t", row.names = FALSE, quote = FALSE)
-  cat("  gsea_kegg_signif.tsv: 0 significant enrichments (empty)\n")
-}
-
-if (length(gsea_go_all) > 0) {
-  gsea_go_combined <- do.call(rbind, gsea_go_all)
-  write.table(gsea_go_combined,
-              file = file.path(out_dir, "gsea_go_all.tsv"),
-              sep = "\t", row.names = FALSE, quote = FALSE)
-  cat(sprintf("  gsea_go_all.tsv: %d rows\n", nrow(gsea_go_combined)))
-
-  gsea_go_sig <- gsea_go_combined[gsea_go_combined$p.adjust < 0.05, ]
-  write.table(gsea_go_sig,
-              file = file.path(out_dir, "gsea_go_signif.tsv"),
-              sep = "\t", row.names = FALSE, quote = FALSE)
-  cat(sprintf("  gsea_go_signif.tsv: %d significant enrichments\n",
-              nrow(gsea_go_sig)))
-} else {
-  write.table(data.frame(ID = character(), Description = character(),
-    setSize = integer(), enrichmentScore = numeric(), NES = numeric(),
-    pvalue = numeric(), p.adjust = numeric(), qvalue = numeric(),
-    rank = numeric(), leading_edge = character(), core_enrichment = character(),
-    contrast = character(), stringsAsFactors = FALSE),
-    file = file.path(out_dir, "gsea_go_signif.tsv"),
-    sep = "\t", row.names = FALSE, quote = FALSE)
-  cat("  gsea_go_signif.tsv: 0 significant enrichments (empty)\n")
-}
-
-# --- GSEA Dot Plot ---
-if (length(gsea_kegg_all) > 0 && nrow(gsea_kegg_sig) > 2) {
-  cat("\nGenerating GSEA dot plot...\n")
-  plot_data <- gsea_kegg_sig %>%
-    dplyr::group_by(contrast) %>%
-    dplyr::arrange(p.adjust) %>%
-    dplyr::slice_head(n = 10) %>%
-    dplyr::ungroup()
-
-  dp <- ggplot(plot_data, aes(x = NES, y = reorder(Description, NES),
-                              size = -log10(p.adjust), color = p.adjust)) +
-    geom_point() +
-    facet_wrap(~ contrast, scales = "free_y", ncol = 3) +
-    scale_color_gradient(low = "red", high = "blue") +
-    theme_minimal(base_size = 9) +
-    labs(x = "NES", y = "", title = "GSEA KEGG: Top 10 per contrast (padj < 0.05)") +
-    theme(strip.text = element_text(size = 7),
-          axis.text.y = element_text(size = 6))
-
-  ggsave(file.path(out_dir, "gsea_dotplot_kegg.pdf"), dp,
-         width = 16, height = max(8, nrow(gsea_kegg_sig) * 0.15),
-         limitsize = FALSE)
-  cat("  Saved gsea_dotplot_kegg.pdf\n")
-} else {
-  pdf(file.path(out_dir, "gsea_dotplot_kegg.pdf"), width = 6, height = 4)
-  print(ggplot() + theme_void() + labs(title = "GSEA KEGG: No significant enrichments"))
-  dev.off()
-  cat("  Saved gsea_dotplot_kegg.pdf (blank — no significant enrichments)\n")
+  ranked_lists[[cname]] <- gene_list
 }
 
 # ==============================
-# Part 2: Pathview Maps
+# Part 2: Helper to run and save GSEA for any collection
+# ==============================
+
+empty_gsea <- function() {
+  data.frame(ID = character(), Description = character(), setSize = integer(),
+             enrichmentScore = numeric(), NES = numeric(), pvalue = numeric(),
+             p.adjust = numeric(), qvalue = numeric(), rank = numeric(),
+             leading_edge = character(), core_enrichment = character(),
+             contrast = character(), stringsAsFactors = FALSE)
+}
+
+run_gsea_collection <- function(gene_lists, term2gene, collection_name) {
+  cat(sprintf("\nRunning GSEA: %s\n", collection_name))
+  all_res <- list()
+
+  for (cname in names(gene_lists)) {
+    gl <- gene_lists[[cname]]
+    res <- tryCatch({
+      GSEA(geneList = gl, TERM2GENE = term2gene, pvalueCutoff = 0.05,
+           minGSSize = gsea_min, maxGSSize = gsea_max, eps = EPS, seed = 42)
+    }, error = function(e) { NULL })
+
+    if (!is.null(res) && nrow(res@result) > 0) {
+      rr <- res@result
+      rr$contrast <- cname
+      all_res[[cname]] <- rr
+    }
+  }
+
+  if (length(all_res) > 0) {
+    all_df <- do.call(rbind, all_res)
+    sig_df <- all_df[all_df$p.adjust < 0.05, ]
+    write.table(all_df, file.path(out_dir, sprintf("gsea_%s_all.tsv", collection_name)),
+                sep = "\t", row.names = FALSE, quote = FALSE)
+    write.table(sig_df, file.path(out_dir, sprintf("gsea_%s_signif.tsv", collection_name)),
+                sep = "\t", row.names = FALSE, quote = FALSE)
+    cat(sprintf("  %s: %d total, %d significant\n",
+                collection_name, nrow(all_df), nrow(sig_df)))
+    return(list(all = all_df, signif = sig_df))
+  } else {
+    empty <- empty_gsea()
+    write.table(empty, file.path(out_dir, sprintf("gsea_%s_all.tsv", collection_name)),
+                sep = "\t", row.names = FALSE, quote = FALSE)
+    write.table(empty, file.path(out_dir, sprintf("gsea_%s_signif.tsv", collection_name)),
+                sep = "\t", row.names = FALSE, quote = FALSE)
+    cat(sprintf("  %s: 0 enrichments\n", collection_name))
+    return(list(all = empty, signif = empty))
+  }
+}
+
+plot_gsea_dot <- function(sig_df, collection_name, n_top = 10) {
+  plot_pdf <- file.path(out_dir, sprintf("gsea_dotplot_%s.pdf", collection_name))
+  plot_png <- file.path(out_dir, sprintf("gsea_dotplot_%s.png", collection_name))
+  if (nrow(sig_df) > 2) {
+    plot_data <- sig_df %>%
+      dplyr::group_by(contrast) %>%
+      dplyr::arrange(p.adjust) %>%
+      dplyr::slice_head(n = n_top) %>%
+      dplyr::ungroup()
+
+    # Truncate long descriptions
+    plot_data$Description <- substr(plot_data$Description, 1, 80)
+
+    dp <- ggplot(plot_data, aes(x = NES, y = reorder(Description, NES),
+                                size = -log10(p.adjust), color = p.adjust)) +
+      geom_point() +
+      facet_wrap(~ contrast, scales = "free_y", ncol = 3) +
+      scale_color_gradient(low = "red", high = "blue") +
+      theme_minimal(base_size = 9) +
+      labs(x = "NES", y = "",
+           title = sprintf("GSEA %s: Top %d per contrast (padj < 0.05)",
+                           collection_name, n_top)) +
+      theme(strip.text = element_text(size = 7),
+            axis.text.y = element_text(size = 6))
+
+    ggsave(plot_pdf, dp,
+           width = 16, height = max(8, nrow(plot_data) * 0.12),
+           limitsize = FALSE)
+    ggsave(plot_png, dp,
+           width = 16, height = max(8, nrow(plot_data) * 0.12),
+           dpi = 150, limitsize = FALSE)
+    cat(sprintf("  Saved %s and %s\n", basename(plot_pdf), basename(plot_png)))
+  } else {
+    p_blank <- ggplot() + theme_void() + labs(
+      title = sprintf("GSEA %s: No significant enrichments", collection_name))
+    pdf(plot_pdf, width = 6, height = 4)
+    print(p_blank)
+    dev.off()
+    ggsave(plot_png, p_blank, width = 6, height = 4, dpi = 150)
+    cat(sprintf("  Saved %s and %s (blank)\n", basename(plot_pdf), basename(plot_png)))
+  }
+}
+
+# --- 2a. KEGG ---
+kegg_res <- list()
+for (cname in names(ranked_lists)) {
+  gl <- ranked_lists[[cname]]
+  res <- tryCatch({
+    gseKEGG(geneList = gl, organism = "hsa", pvalueCutoff = 0.05,
+            minGSSize = gsea_min, maxGSSize = gsea_max, eps = EPS, seed = 42)
+  }, error = function(e) { NULL })
+  if (!is.null(res) && nrow(res@result) > 0) {
+    rr <- res@result
+    rr$contrast <- cname
+    kegg_res[[cname]] <- rr
+  }
+}
+if (length(kegg_res) > 0) {
+  kegg_all <- do.call(rbind, kegg_res)
+  kegg_sig <- kegg_all[kegg_all$p.adjust < 0.05, ]
+} else {
+  kegg_all <- empty_gsea()
+  kegg_sig <- empty_gsea()
+}
+write.table(kegg_all, file.path(out_dir, "gsea_kegg_all.tsv"), sep = "\t",
+            row.names = FALSE, quote = FALSE)
+write.table(kegg_sig, file.path(out_dir, "gsea_kegg_signif.tsv"), sep = "\t",
+            row.names = FALSE, quote = FALSE)
+plot_gsea_dot(kegg_sig, "kegg")
+
+# --- 2b. GO BP (simplified) ---
+go_res <- list()
+for (cname in names(ranked_lists)) {
+  gl <- ranked_lists[[cname]]
+  res <- tryCatch({
+    gseGO(geneList = gl, OrgDb = org.Hs.eg.db, ont = "BP",
+          pvalueCutoff = 0.05, minGSSize = gsea_min, maxGSSize = gsea_max,
+          eps = EPS, seed = 42)
+  }, error = function(e) { NULL })
+  if (!is.null(res) && nrow(res@result) > 0) {
+    rr <- res@result
+    rr$contrast <- cname
+    go_res[[cname]] <- rr
+  }
+}
+if (length(go_res) > 0) {
+  go_all <- do.call(rbind, go_res)
+  go_sig <- go_all[go_all$p.adjust < 0.05, ]
+  # Simplify redundant GO terms
+  go_sig <- tryCatch({
+    simplify(go_sig, cutoff = 0.7, by = "p.adjust", select_fun = min)
+  }, error = function(e) { go_sig })
+} else {
+  go_all <- empty_gsea()
+  go_sig <- empty_gsea()
+}
+write.table(go_all, file.path(out_dir, "gsea_go_all.tsv"), sep = "\t",
+            row.names = FALSE, quote = FALSE)
+write.table(go_sig, file.path(out_dir, "gsea_go_signif.tsv"), sep = "\t",
+            row.names = FALSE, quote = FALSE)
+plot_gsea_dot(go_sig, "go")
+
+# --- 2c. MSigDB Hallmarks ---
+msig_h <- msigdbr(species = "Homo sapiens", collection = "H")
+term2gene_h <- msig_h[, c("gs_name", "ncbi_gene")]
+names(term2gene_h) <- c("term", "gene")
+term2gene_h$gene <- as.character(term2gene_h$gene)
+hallmark <- run_gsea_collection(ranked_lists, term2gene_h, "hallmark")
+plot_gsea_dot(hallmark$signif, "hallmark")
+
+# --- 2d. Reactome ---
+msig_r <- msigdbr(species = "Homo sapiens", collection = "C2",
+                  subcollection = "CP:REACTOME")
+term2gene_r <- msig_r[, c("gs_name", "ncbi_gene")]
+names(term2gene_r) <- c("term", "gene")
+term2gene_r$gene <- as.character(term2gene_r$gene)
+reactome <- run_gsea_collection(ranked_lists, term2gene_r, "reactome")
+plot_gsea_dot(reactome$signif, "reactome")
+
+# --- 2e. Custom virus/innate-immune collection ---
+custom_gmt <- file.path("resources", "gene_sets", "custom_virus_innate.gmt")
+if (!file.exists(custom_gmt)) {
+  custom_gmt <- file.path(dirname(sys.frame(1)$ofile), "..", "resources",
+                          "gene_sets", "custom_virus_innate.gmt")
+}
+if (!file.exists(custom_gmt)) {
+  custom_gmt <- normalizePath(file.path(out_dir, "..", "..", "pipeline",
+                                        "resources", "gene_sets",
+                                        "custom_virus_innate.gmt"),
+                              mustWork = FALSE)
+}
+custom <- list(all = empty_gsea(), signif = empty_gsea())
+if (file.exists(custom_gmt)) {
+  term2gene_c <- read.gmt(custom_gmt)
+  if (nrow(term2gene_c) > 0) {
+    term2gene_c$gene <- as.character(term2gene_c$gene)
+    custom <- run_gsea_collection(ranked_lists, term2gene_c, "custom")
+    plot_gsea_dot(custom$signif, "custom")
+  }
+} else {
+  cat("  custom GMT not found; skipping custom GSEA\n")
+  write.table(empty_gsea(), file.path(out_dir, "gsea_custom_all.tsv"),
+              sep = "\t", row.names = FALSE, quote = FALSE)
+  write.table(empty_gsea(), file.path(out_dir, "gsea_custom_signif.tsv"),
+              sep = "\t", row.names = FALSE, quote = FALSE)
+}
+
+# ==============================
+# Part 3: Pathview Maps
 # ==============================
 cat("\n=== Part 2: Pathview ===\n")
 
-# Select key contrasts for pathview (auto-pick: between-cell-line + first/last time contrasts)
 pathview_contrasts <- intersect(c(
   grep("_vs_", contrasts, value = TRUE),
   grep("interaction_", contrasts, value = TRUE)
 ), contrasts)
 if (length(pathview_contrasts) > 7) pathview_contrasts <- head(pathview_contrasts, 7)
 
-# Get top KEGG pathways across all significant enrichments
-if (exists("gsea_kegg_sig") && nrow(gsea_kegg_sig) > 0) {
-
-  # Pick pathways with strong enrichments (lowest padj)
-  top_kegg <- gsea_kegg_sig %>%
+if (nrow(kegg_sig) > 0) {
+  top_kegg <- kegg_sig %>%
     dplyr::group_by(ID) %>%
     dplyr::summarise(min_padj = min(p.adjust), desc = dplyr::first(Description)) %>%
     dplyr::arrange(min_padj) %>%
     dplyr::slice_head(n = 20)
 
   top_kegg_ids <- top_kegg$ID
-
-  # Create a root directory for pathview output images
-  # (pathview writes final images to working directory, not kegg.dir)
   pv_root <- normalizePath(file.path(out_dir, "pathview_output"), mustWork = FALSE)
   dir.create(pv_root, showWarnings = FALSE, recursive = TRUE)
   main_wd <- getwd()
@@ -250,7 +326,6 @@ if (exists("gsea_kegg_sig") && nrow(gsea_kegg_sig) > 0) {
     cid_desc <- gsub("[^A-Za-z0-9_-]", "_", cid_desc)
     cat(sprintf("  Pathview: %s (%s)\n", cid, cid_desc))
 
-    # Sub-directory for this pathway
     cid_dir <- file.path(pv_root, paste0(cid, "_", cid_desc))
     dir.create(cid_dir, showWarnings = FALSE, recursive = TRUE)
 
@@ -258,7 +333,6 @@ if (exists("gsea_kegg_sig") && nrow(gsea_kegg_sig) > 0) {
       log2fc_col <- paste0(pc, "_log2FC")
       if (!log2fc_col %in% names(combined)) next
 
-      # Build ENTREZ-named log2FC vector
       fc_df <- combined[!is.na(combined$entrez) & !is.na(combined[[log2fc_col]]),
                         c("entrez", log2fc_col)]
       gene_fc <- setNames(fc_df[[log2fc_col]], as.character(fc_df$entrez))
@@ -272,9 +346,7 @@ if (exists("gsea_kegg_sig") && nrow(gsea_kegg_sig) > 0) {
 
       if (sum(abs(gene_fc) > 0) < 1) next
 
-      # Switch working directory so pathview writes images here
       setwd(cid_dir)
-
       out_suffix <- gsub("_", ".", pc)
 
       tryCatch({
@@ -294,7 +366,6 @@ if (exists("gsea_kegg_sig") && nrow(gsea_kegg_sig) > 0) {
     }
   }
 
-  # Clean up stray files in working directory
   stray_pngs <- list.files(main_wd, pattern = "^hsa.*\\.png$", full.names = TRUE)
   if (length(stray_pngs) > 0) file.remove(stray_pngs)
   stray_xmls <- list.files(main_wd, pattern = "^hsa.*\\.xml$", full.names = TRUE)
@@ -306,56 +377,45 @@ if (exists("gsea_kegg_sig") && nrow(gsea_kegg_sig) > 0) {
 }
 
 # ==============================
-# Part 3: GSVA Pathway Activity
+# Part 4: GSVA Pathway Activity (visualization only)
 # ==============================
-cat("\n=== Part 3: GSVA ===\n")
+cat("\n=== Part 3: GSVA (visualization only) ===\n")
 
-# Load metadata
 metadata <- read.delim(file.path(results_dir, "tables", "metadata.tsv"),
                        stringsAsFactors = FALSE)
 rownames(metadata) <- metadata$sample_id
 metadata$cell_line  <- factor(metadata$cell_line)
-metadata$time       <- factor(metadata$time)
+metadata$time       <- factor(metadata$time, levels = unique(metadata$time))
 metadata$treatment  <- factor(metadata$treatment)
-metadata$group      <- factor(paste(metadata$cell_line, metadata$time, metadata$treatment, sep = "_"))
+metadata$group      <- factor(paste(metadata$cell_line, metadata$time,
+                                    metadata$treatment, sep = "_"))
 
-# Load VST counts
-cat("Loading VST counts...\n")
-vst_counts <- as.matrix(read.table(file.path(results_dir, "tables", "vst_normalized_counts.tsv"),
-                                    header = TRUE, row.names = 1, sep = "\t",
-                                    check.names = FALSE))
+vst_counts <- as.matrix(read.table(file.path(results_dir, "tables",
+                                              "vst_normalized_counts.tsv"),
+                                   header = TRUE, row.names = 1, sep = "\t",
+                                   check.names = FALSE))
 
-# Get Hallmark gene sets (ENTREZ)
-cat("Loading Hallmark gene sets...\n")
-msigdb_h <- msigdbr(species = "Homo sapiens", category = "H")
-msigdb_h$entrez <- as.character(msigdb_h$entrez_gene)
+# Hallmark gene sets
+msigdb_h <- msigdbr(species = "Homo sapiens", collection = "H")
+msigdb_h$entrez <- as.character(msigdb_h$ncbi_gene)
 h_gene_sets <- split(msigdb_h$entrez, msigdb_h$gs_name)
-cat(sprintf("  %d Hallmark gene sets loaded\n", length(h_gene_sets)))
 
-# Filter and map VST matrix to ENTREZ IDs
 ensg_to_entrez <- setNames(combined$entrez, combined$gene_id)
 ensg_to_entrez <- ensg_to_entrez[!is.na(ensg_to_entrez)]
-
 common_genes <- intersect(rownames(vst_counts), names(ensg_to_entrez))
 vst_entrez <- vst_counts[common_genes, , drop = FALSE]
 rownames(vst_entrez) <- ensg_to_entrez[common_genes]
-
-# Remove duplicate ENTREZ (keep first)
 dup_entrez <- duplicated(rownames(vst_entrez))
 vst_entrez <- vst_entrez[!dup_entrez, , drop = FALSE]
 
 cat(sprintf("  Expression matrix: %d genes x %d samples\n",
             nrow(vst_entrez), ncol(vst_entrez)))
 
-# Run GSVA (Hallmark)
 cat("Running GSVA (Hallmark)...\n")
 gsva_param <- gsvaParam(exprData = vst_entrez, geneSets = h_gene_sets,
-                         minSize = gsea_min, maxSize = gsea_max, kcdf = "Gaussian")
+                        minSize = gsea_min, maxSize = gsea_max, kcdf = "Gaussian")
 gsva_res <- gsva(gsva_param)
-cat(sprintf("  GSVA complete: %d gene sets x %d samples\n",
-            nrow(gsva_res), ncol(gsva_res)))
 
-# Save GSVA scores
 gsva_df <- as.data.frame(gsva_res)
 gsva_df$pathway <- rownames(gsva_df)
 gsva_df <- gsva_df[, c("pathway", colnames(gsva_res))]
@@ -363,149 +423,90 @@ write.table(gsva_df, file = file.path(out_dir, "gsva_scores.tsv"),
             sep = "\t", row.names = FALSE, quote = FALSE)
 cat("  Saved gsva_scores.tsv\n")
 
-# --- Differential Pathway Activity ---
-cat("Testing differential pathway activity...\n")
+# Sample-level heatmap of most variable Hallmark pathways
+var_scores <- apply(gsva_res, 1, var, na.rm = TRUE)
+top_pathways <- names(sort(var_scores, decreasing = TRUE))[seq_len(min(50, length(var_scores)))]
+mat <- gsva_res[top_pathways, , drop = FALSE]
+rownames(mat) <- gsub("HALLMARK_", "", rownames(mat))
 
-# Auto-generate tests from metadata factors
+annotation_col <- metadata[, c("cell_line", "time", "treatment"), drop = FALSE]
+ann_colors <- list(
+  cell_line = setNames(RColorBrewer::brewer.pal(max(3, length(levels(metadata$cell_line))), "Set1")[seq_along(levels(metadata$cell_line))], levels(metadata$cell_line)),
+  treatment = setNames(RColorBrewer::brewer.pal(max(3, length(levels(metadata$treatment))), "Set2")[seq_along(levels(metadata$treatment))], levels(metadata$treatment)),
+  time = setNames(RColorBrewer::brewer.pal(max(3, length(levels(metadata$time))), "Dark2")[seq_along(levels(metadata$time))], levels(metadata$time))
+)
+
+pdf(file.path(out_dir, "gsva_sample_heatmap.pdf"), width = 14,
+    height = max(8, nrow(mat) * 0.3))
+pheatmap(mat, annotation_col = annotation_col, annotation_colors = ann_colors,
+         scale = "row", cluster_rows = TRUE, cluster_cols = TRUE,
+         show_rownames = TRUE, show_colnames = TRUE,
+         fontsize_row = 8, fontsize_col = 8,
+         main = "Top 50 variable Hallmark pathway scores per sample")
+dev.off()
+png(file.path(out_dir, "gsva_sample_heatmap.png"), width = 14,
+    height = max(8, nrow(mat) * 0.3), units = "in", res = 150)
+pheatmap(mat, annotation_col = annotation_col, annotation_colors = ann_colors,
+         scale = "row", cluster_rows = TRUE, cluster_cols = TRUE,
+         show_rownames = TRUE, show_colnames = TRUE,
+         fontsize_row = 8, fontsize_col = 8,
+         main = "Top 50 variable Hallmark pathway scores per sample")
+dev.off()
+cat("  Saved gsva_sample_heatmap.pdf/png\n")
+
+# Contrast mean-difference summary (no p-values — n=2 is underpowered)
 cl_levs <- levels(metadata$cell_line)
 tp_levs <- levels(metadata$time)
 trt_levs <- levels(metadata$treatment)
-ref_cl <- design$factors$reference_cell_line %||% cl_levs[1]
+ref_cl  <- design$factors$reference_cell_line %||% cl_levs[1]
 ref_trt <- design$factors$reference_treatment %||% trt_levs[1]
 nonref_trts <- setdiff(trt_levs, ref_trt)
 
-diff_tests <- list()
-# Within-cell-line treatment vs control: each cell × each time × each non-ref treatment
+gsva_summary <- list()
 for (cl in cl_levs) {
   for (tp in tp_levs) {
     for (trt in nonref_trts) {
       tname <- paste0(cl, "_", tp, "_", trt, "_vs_", ref_trt)
-      diff_tests[[tname]] <- list(
-        samples_a = metadata$sample_id[metadata$cell_line == cl & metadata$time == tp & metadata$treatment == trt],
-        samples_b = metadata$sample_id[metadata$cell_line == cl & metadata$time == tp & metadata$treatment == ref_trt]
-      )
+      s_a <- metadata$sample_id[metadata$cell_line == cl &
+                                metadata$time == tp &
+                                metadata$treatment == trt]
+      s_b <- metadata$sample_id[metadata$cell_line == cl &
+                                metadata$time == tp &
+                                metadata$treatment == ref_trt]
+      if (length(s_a) == 0 || length(s_b) == 0) next
+      for (pw in rownames(gsva_res)) {
+        gsva_summary[[length(gsva_summary) + 1]] <- data.frame(
+          contrast = tname,
+          pathway = pw,
+          mean_case = mean(gsva_res[pw, s_a], na.rm = TRUE),
+          mean_control = mean(gsva_res[pw, s_b], na.rm = TRUE),
+          mean_diff = mean(gsva_res[pw, s_a], na.rm = TRUE) - mean(gsva_res[pw, s_b], na.rm = TRUE),
+          stringsAsFactors = FALSE
+        )
+      }
     }
   }
 }
-# Between cell lines: at every timepoint × treatment
-if (length(cl_levs) >= 2) {
-  nonref_cl <- setdiff(cl_levs, ref_cl)[1]
-  for (tp in tp_levs) {
-    for (trt in trt_levs) {
-      tname <- paste0(nonref_cl, "_vs_", ref_cl, "_", tp, "_", trt)
-      diff_tests[[tname]] <- list(
-        samples_a = metadata$sample_id[metadata$cell_line == nonref_cl & metadata$time == tp & metadata$treatment == trt],
-        samples_b = metadata$sample_id[metadata$cell_line == ref_cl & metadata$time == tp & metadata$treatment == trt]
-      )
-    }
-  }
-}
 
-all_diff <- list()
-
-for (test_name in names(diff_tests)) {
-  ga <- diff_tests[[test_name]]$samples_a
-  gb <- diff_tests[[test_name]]$samples_b
-
-  if (length(ga) < 2 || length(gb) < 2) next
-
-  for (i in seq_len(nrow(gsva_res))) {
-    vals_a <- gsva_res[i, ga, drop = TRUE]
-    vals_b <- gsva_res[i, gb, drop = TRUE]
-
-    if (sd(c(vals_a, vals_b)) < 1e-6) next
-
-    wt <- wilcox.test(vals_a, vals_b)
-    tmean_diff <- mean(vals_a) - mean(vals_b)
-
-    all_diff[[length(all_diff) + 1]] <- data.frame(
-      test = test_name,
-      pathway = rownames(gsva_res)[i],
-      mean_diff = tmean_diff,
-      pvalue = wt$p.value,
-      stringsAsFactors = FALSE
-    )
-  }
-}
-
-if (length(all_diff) > 0) {
-  diff_table <- do.call(rbind, all_diff)
-  diff_table$padj <- p.adjust(diff_table$pvalue, method = "BH")
-
-  write.table(diff_table, file = file.path(out_dir, "gsva_diff_results.tsv"),
+if (length(gsva_summary) > 0) {
+  gsva_summary_df <- do.call(rbind, gsva_summary)
+  write.table(gsva_summary_df, file.path(out_dir, "gsva_contrast_summary.tsv"),
               sep = "\t", row.names = FALSE, quote = FALSE)
-
-  n_sig <- sum(diff_table$padj < 0.05)
-  cat(sprintf("  gsva_diff_results.tsv: %d rows, %d significant (padj < 0.05)\n",
-              nrow(diff_table), n_sig))
-
-  # --- GSVA Heatmap ---
-  sig_pathways <- diff_table$pathway[diff_table$padj < 0.05]
-  if (length(sig_pathways) > 2) {
-    sig_pathways <- unique(sig_pathways)
-    sig_pathways <- head(sig_pathways, 50)
-
-    mat <- gsva_res[sig_pathways, , drop = FALSE]
-    rownames(mat) <- gsub("HALLMARK_", "", rownames(mat))
-
-    annotation_col <- metadata[, c("cell_line", "time"), drop = FALSE]
-    ann_colors <- list(
-      cell_line = setNames(c("#E41A1C","#377EB8","#4DAF4A","#984EA3","#FF7F00","#A65628")[seq_along(cl_levs)], cl_levs),
-      time = setNames(c("#4DAF4A","#FF7F00","#984EA3","#377EB8","#E41A1C","#A65628","#F781BF","#999999")[seq_along(tp_levs)], tp_levs)
-    )
-
-    pdf(file.path(out_dir, "gsva_heatmap.pdf"), width = 12, height = max(8, nrow(mat) * 0.3))
-    pheatmap(mat, annotation_col = annotation_col, annotation_colors = ann_colors,
-             scale = "row", cluster_rows = TRUE, cluster_cols = TRUE,
-             show_rownames = TRUE, show_colnames = TRUE,
-             fontsize_row = 7, fontsize_col = 8,
-             main = "Significantly changed Hallmark pathways (GSVA)")
-    dev.off()
-    cat("  Saved gsva_heatmap.pdf\n")
-  }
+  cat(sprintf("  Saved gsva_contrast_summary.tsv (%d rows)\n", nrow(gsva_summary_df)))
 } else {
-  write.table(data.frame(test = character(), pathway = character(),
-    mean_diff = numeric(), pvalue = numeric(), padj = numeric(),
-    stringsAsFactors = FALSE),
-    file = file.path(out_dir, "gsva_diff_results.tsv"),
-    sep = "\t", row.names = FALSE, quote = FALSE)
-  cat("  gsva_diff_results.tsv: 0 rows (empty — no differential tests)\n")
+  write.table(data.frame(contrast = character(), pathway = character(),
+                         mean_case = numeric(), mean_control = numeric(),
+                         mean_diff = numeric(), stringsAsFactors = FALSE),
+              file.path(out_dir, "gsva_contrast_summary.tsv"),
+              sep = "\t", row.names = FALSE, quote = FALSE)
+  cat("  Saved gsva_contrast_summary.tsv (empty)\n")
 }
 
-# --- GSVA Dot/Bar Plot ---
-if (exists("diff_table") && nrow(diff_table) > 0) {
-  top_diff <- diff_table %>%
-    dplyr::group_by(test) %>%
-    dplyr::arrange(pvalue) %>%
-    dplyr::slice_head(n = 10) %>%
-    dplyr::ungroup()
-
-  top_diff$neg_log10_padj <- -log10(top_diff$padj)
-  top_diff$neg_log10_padj[is.infinite(top_diff$neg_log10_padj)] <- max(
-    top_diff$neg_log10_padj[is.finite(top_diff$neg_log10_padj)], na.rm = TRUE)
-
-  dbp <- ggplot(top_diff, aes(x = mean_diff, y = reorder(pathway, mean_diff),
-                               fill = mean_diff, size = neg_log10_padj)) +
-    geom_point(shape = 21) +
-    facet_wrap(~ test, scales = "free_y", ncol = 2) +
-    scale_fill_gradient2(low = "blue", mid = "white", high = "red") +
-    theme_minimal(base_size = 9) +
-    labs(x = "Mean GSVA score difference", y = "",
-         title = "Top 10 differentially active Hallmark pathways per test",
-         fill = "Diff", size = "-log10(padj)") +
-    theme(strip.text = element_text(size = 7),
-          axis.text.y = element_text(size = 6))
-
-  ggsave(file.path(out_dir, "gsva_diff_dotplot.pdf"), dbp,
-         width = 14, height = max(8, nrow(top_diff) * 0.15),
-         limitsize = FALSE)
-  cat("  Saved gsva_diff_dotplot.pdf\n")
-} else {
-  pdf(file.path(out_dir, "gsva_diff_dotplot.pdf"), width = 6, height = 4)
-  print(ggplot() + theme_void() + labs(title = "GSVA: No significant pathway changes"))
-  dev.off()
-  cat("  Saved gsva_diff_dotplot.pdf (blank — no significant changes)\n")
-}
+# Remove old misleading differential GSVA file if it exists
+old_gsva_diff <- file.path(out_dir, "gsva_diff_results.tsv")
+if (file.exists(old_gsva_diff)) file.remove(old_gsva_diff)
+old_gsva_dot <- file.path(out_dir, "gsva_diff_dotplot.pdf")
+if (file.exists(old_gsva_dot)) file.remove(old_gsva_dot)
 
 cat("\n=== Pathway Analysis Complete ===\n")
 cat(sprintf("All outputs in: %s/\n", out_dir))

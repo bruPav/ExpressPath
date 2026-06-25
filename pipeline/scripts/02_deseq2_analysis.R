@@ -134,9 +134,14 @@ cat(sprintf("LRT: %d genes with padj < 0.01\n", sum(res_lrt$padj < 0.01, na.rm =
 # --- 4. Part B: Pairwise Wald contrasts (group-based) ---
 dds_wald <- DESeq(dds, test = "Wald", sfType = "poscounts")
 
-# Helper: extract results with lfcShrink
+# Helper: extract results with lfcShrink (ashr if available, else normal)
 extract_contrast <- function(dds, contrast, label = "") {
-  res <- lfcShrink(dds, contrast = contrast, type = "ashr", quiet = TRUE)
+  res <- tryCatch({
+    lfcShrink(dds, contrast = contrast, type = "ashr", quiet = TRUE)
+  }, error = function(e) {
+    cat(sprintf("    ashr shrink failed for %s, using normal shrinkage\n", label))
+    lfcShrink(dds, contrast = contrast, type = "normal", quiet = TRUE)
+  })
   cat(sprintf("  %-50s: %5d sig (padj < %.2g)\n",
               label, sum(res$padj < alpha_val, na.rm = TRUE), alpha_val))
   res
@@ -395,7 +400,7 @@ top50 <- head(combined[order(combined$lrt_pvalue), ], 50)
 if (nrow(top50) > 2) {
   top_ids <- top50$gene_id
   mat <- assay(vsd)[top_ids, , drop = FALSE]
-  rownames(mat) <- top50$gene_symbol[match(top_ids, top50$gene_id)]
+  rownames(mat) <- make.unique(top50$gene_symbol[match(top_ids, top50$gene_id)])
 
   # Z-score normalize rows
   mat <- t(scale(t(mat)))
@@ -432,26 +437,9 @@ if (nrow(top50) > 2) {
   cat("Saved heatmap_top50.pdf\n")
 }
 
-# 7d. Volcano plots for key contrasts
-# Pick up to 6 representative contrasts across types
-volcano_contrasts <- names(contrast_list)
-if (exists("contrast_info") && length(contrast_info) > 0) {
-  # Prefer: 2 treatment_vs_control, 2 progression, 1 between_treatments, 1 between_cell_lines
-  cinfo_df <- read.table(file.path(out_dir, "tables", "contrast_info.tsv"),
-                         header = TRUE, sep = "\t", stringsAsFactors = FALSE)
-  picked <- c(
-    head(intersect(cinfo_df$contrast_name[cinfo_df$type == "treatment_vs_control" & cinfo_df$cell_line == ref_cl], names(contrast_list)), 2),
-    head(intersect(cinfo_df$contrast_name[cinfo_df$type == "progression" & cinfo_df$cell_line == ref_cl], names(contrast_list)), 2),
-    head(intersect(cinfo_df$contrast_name[cinfo_df$type == "between_treatments"], names(contrast_list)), 1),
-    head(intersect(cinfo_df$contrast_name[cinfo_df$type == "between_cell_lines"], names(contrast_list)), 1)
-  )
-  volcano_contrasts <- intersect(na.omit(picked), names(contrast_list))
-}
-volcano_contrasts <- na.omit(volcano_contrasts)
-if (length(volcano_contrasts) > 6) volcano_contrasts <- head(volcano_contrasts, 6)
-for (vc in volcano_contrasts) {
-  if (!vc %in% names(contrast_list)) next
-
+# 7d. Volcano plots — all contrasts in a single multi-page PDF
+pdf(file.path(out_dir, "qc", "volcano_plots.pdf"), width = 7, height = 6)
+for (vc in names(contrast_list)) {
   log2fc_col <- paste0(vc, "_log2FC")
   padj_col   <- paste0(vc, "_padj")
 
@@ -463,10 +451,12 @@ for (vc in volcano_contrasts) {
     stringsAsFactors = FALSE
   )
   vol_data <- vol_data[!is.na(vol_data$padj), ]
-  vol_data$neg_log10_padj <- -log10(vol_data$padj)
+  vol_data$neg_log10_padj <- pmin(-log10(vol_data$padj), 50)
   vol_data$signif <- vol_data$padj < alpha_val
   vol_data$label <- ifelse(vol_data$signif & abs(vol_data$log2FC) > 2,
                            vol_data$gene_symbol, "")
+
+  n_sig <- sum(vol_data$signif)
 
   p <- ggplot(vol_data, aes(x = log2FC, y = neg_log10_padj, color = signif)) +
     geom_point(size = 0.5, alpha = 0.5) +
@@ -477,13 +467,13 @@ for (vc in volcano_contrasts) {
     geom_vline(xintercept = c(-1, 1), linetype = "dotted", color = "grey40") +
     xlab("log2 Fold Change") +
     ylab("-log10(adjusted p-value)") +
-    ggtitle(paste0("Volcano: ", vc)) +
+    ggtitle(paste0(vc, " — ", n_sig, " DEGs")) +
     theme_minimal(base_size = 12) +
     theme(legend.position = "none")
-
-  ggsave(file.path(out_dir, "deg", paste0("volcano_", vc, ".pdf")), p, width = 7, height = 6)
+  print(p)
 }
-cat("Saved volcano plots\n")
+dev.off()
+cat(sprintf("Saved volcano_plots.pdf (%d contrasts)\n", length(contrast_list)))
 
 # 7e. Sample-to-sample distance heatmap
 sample_dists <- dist(t(assay(vsd)))
@@ -565,7 +555,12 @@ if (length(lrt_signif_genes) >= 10) {
 
       tmp_s <- standardise(tmp_expr)
       m1 <- mestimate(tmp_s)
-      cl_result <- mfuzz(tmp_s, c = n_clust, m = m1)
+      n_clust_use <- min(n_clust, nrow(tp_matrix))
+      if (n_clust_use < 2) {
+        cat(sprintf("  %s: too few genes for clustering, skipping\n", tag))
+        next
+      }
+      cl_result <- mfuzz(tmp_s, c = n_clust_use, m = m1)
 
       memb <- cl_result$membership
       colnames(memb) <- paste0("C", 1:ncol(memb))
@@ -598,11 +593,11 @@ if (length(lrt_signif_genes) >= 10) {
       }
 
       pdf(file.path(out_dir, "cross_temporal", paste0("cluster_profiles_", tag, ".pdf")), width = 10, height = 8)
-      mfuzz.plot2(tmp_s, cl = cl_result, mfrow = c(ceiling(n_clust / 3), min(3, n_clust)),
+      mfuzz.plot2(tmp_s, cl = cl_result, mfrow = c(ceiling(n_clust_use / 3), min(3, n_clust_use)),
                   time.labels = colnames(tp_matrix),
                   xlab = "Time point", ylab = "Expression")
       dev.off()
-      cat(sprintf("    Saved cluster_profiles_%s.pdf (%d clusters)\n", tag, n_clust))
+      cat(sprintf("    Saved cluster_profiles_%s.pdf (%d clusters)\n", tag, n_clust_use))
     }
   }
 

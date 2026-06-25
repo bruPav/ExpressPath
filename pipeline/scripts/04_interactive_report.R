@@ -57,6 +57,104 @@ metadata <- read.delim(file.path(results_dir, "tables", "metadata.tsv"),
                        stringsAsFactors = FALSE)
 gsea_kegg <- read.delim(file.path(out_dir, "gsea_kegg_signif.tsv"),
                         stringsAsFactors = FALSE)
+gsea_hallmark <- read.delim(file.path(out_dir, "gsea_hallmark_signif.tsv"),
+                            stringsAsFactors = FALSE)
+gsea_reactome <- read.delim(file.path(out_dir, "gsea_reactome_signif.tsv"),
+                            stringsAsFactors = FALSE)
+gsea_custom   <- read.delim(file.path(out_dir, "gsea_custom_signif.tsv"),
+                            stringsAsFactors = FALSE)
+gsea_go       <- read.delim(file.path(out_dir, "gsea_go_signif.tsv"),
+                            stringsAsFactors = FALSE)
+
+# Helper to load a dotplot PNG as base64
+load_png_b64 <- function(path) {
+  if (file.exists(path)) {
+    base64encode(readBin(path, "raw", file.info(path)$size))
+  } else {
+    NULL
+  }
+}
+
+gsea_collection_pngs <- list(
+  hallmark = load_png_b64(file.path(out_dir, "gsea_dotplot_hallmark.png")),
+  reactome = load_png_b64(file.path(out_dir, "gsea_dotplot_reactome.png")),
+  custom   = load_png_b64(file.path(out_dir, "gsea_dotplot_custom.png")),
+  go       = load_png_b64(file.path(out_dir, "gsea_dotplot_go.png")),
+  kegg     = load_png_b64(file.path(out_dir, "gsea_dotplot_kegg.png"))
+)
+
+gsva_heatmap_png <- load_png_b64(file.path(out_dir, "gsva_sample_heatmap.png"))
+
+# --- Build gene-set enrichment tab content ---
+build_enrichment_rows <- function(df, collection_label) {
+  if (nrow(df) == 0) {
+    return(sprintf('<tr><td colspan="5" class="text-muted">No significant %s terms</td></tr>', collection_label))
+  }
+  df <- df[order(df$p.adjust), ]
+  df$Description <- substr(df$Description, 1, 100)
+  rows <- character()
+  for (i in seq_len(min(nrow(df), 500))) {
+    rows <- c(rows, sprintf(
+      '<tr><td>%s</td><td>%s</td><td>%.2f</td><td>%s</td><td>%s</td></tr>',
+      df$contrast[i], df$Description[i], df$NES[i],
+      format(df$p.adjust[i], digits = 2, scientific = TRUE),
+      ifelse(df$NES[i] > 0, "Up", "Down")))
+  }
+  paste(rows, collapse = "\n")
+}
+
+enrichment_sections <- list()
+collections <- list(
+  Hallmark = list(df = gsea_hallmark, png = gsea_collection_pngs$hallmark),
+  Reactome = list(df = gsea_reactome, png = gsea_collection_pngs$reactome),
+  Custom   = list(df = gsea_custom,   png = gsea_collection_pngs$custom),
+  GO_BP    = list(df = gsea_go,       png = gsea_collection_pngs$go),
+  KEGG     = list(df = gsea_kegg,     png = gsea_collection_pngs$kegg)
+)
+for (cn in names(collections)) {
+  item <- collections[[cn]]
+  img_html <- if (!is.null(item$png)) {
+    sprintf('<img src="data:image/png;base64,%s" class="img-fluid border mt-2" style="max-width:100%%" alt="%s dotplot">',
+            item$png, cn)
+  } else {
+    '<p class="text-muted small">Dotplot not available</p>'
+  }
+  enrichment_sections[[cn]] <- sprintf('
+<div class="tab-pane fade %s" id="enrich-%s">
+  <h6>%s GSEA significant terms</h6>
+  <div style="max-height:400px;overflow-y:auto">
+    <table class="table table-sm table-striped small" id="enrichTable%s">
+      <thead><tr><th>Contrast</th><th>Term</th><th>NES</th><th>padj</th><th>Dir</th></tr></thead>
+      <tbody>%s</tbody>
+    </table>
+  </div>
+  %s
+</div>', ifelse(cn == "Hallmark", "show active", ""), tolower(cn), cn, cn,
+  build_enrichment_rows(item$df, cn), img_html)
+}
+
+enrichment_nav <- paste(sapply(names(collections), function(cn) {
+  sprintf('<li class="nav-item"><button class="nav-link %s" data-bs-toggle="tab" data-bs-target="#enrich-%s" type="button">%s</button></li>',
+          ifelse(cn == "Hallmark", "active", ""), tolower(cn), cn)
+}), collapse = "\n")
+
+gsva_section_html <- if (!is.null(gsva_heatmap_png)) {
+  sprintf('<div class="mt-4"><h6>GSVA Hallmark pathway scores per sample</h6>
+    <img src="data:image/png;base64,%s" class="img-fluid border" style="max-width:100%%" alt="GSVA sample heatmap">
+    <p class="text-muted small mt-1">Differential testing with only 2 replicates per group is not statistically viable, so no p-values are shown. Use this heatmap for visual exploration only.</p>
+  </div>', gsva_heatmap_png)
+} else {
+  ""
+}
+
+# Build enrichment tab (with GSVA section inserted before closing tag)
+enrichment_tab_html <- paste0('
+<div class="tab-pane fade" id="enrichment">
+  <p class="text-muted small">Hallmark, Reactome, Custom (innate immune / stress), GO BP, and KEGG gene-set enrichments. KEGG disease terms are retained only as an optional output; they are often driven by shared ribosomal, mitochondrial, or histone genes.</p>
+  <ul class="nav nav-tabs mb-2" role="tablist">', enrichment_nav, '</ul>
+  <div class="tab-content">', paste(unlist(enrichment_sections), collapse = "\n"), '</div>
+  ', gsva_section_html, '
+</div>')
 
 # Load temporal analysis results
 cluster_assign <- tryRead(file.path(results_dir, "cross_temporal", "cluster_assignments.tsv"))
@@ -473,20 +571,28 @@ make_gene_table <- function(pid, ct) {
 
   log2fc_col <- paste0(ct, "_log2FC")
   padj_col   <- paste0(ct, "_padj")
+  pval_col   <- paste0(ct, "_pvalue")
   if (!log2fc_col %in% names(combined)) return("")
 
   gene_rows <- c()
   for (ent in core_entrez) {
     info <- entrez_to_info[[ent]]
-    if (is.null(info)) next
-    rows <- which(combined$entrez == ent)
-    if (length(rows) == 0) next
-    r <- rows[1]
+    # Fallback: match by gene symbol if ENTREZ lookup failed
+    if (is.null(info)) {
+      sym_rows <- which(combined$gene_symbol == ent)
+      if (length(sym_rows) == 0) next
+      r <- sym_rows[1]
+    } else {
+      rows <- which(combined$entrez == ent)
+      if (length(rows) == 0) next
+      r <- rows[1]
+    }
 
     symbol  <- combined$gene_symbol[r]
     if (is.na(symbol) || symbol == "--" || symbol == "") symbol <- combined$gene_id[r]
     lfc     <- combined[[log2fc_col]][r]
-    padj    <- combined[[padj_col]][r]
+    padj    <- if (padj_col %in% names(combined)) combined[[padj_col]][r] else NA
+    pval    <- if (pval_col %in% names(combined)) combined[[pval_col]][r] else NA
     is_de   <- !is.na(padj) && padj < 0.05
 
     bold_span <- if (is_de) ' class="fw-bold"' else ""
@@ -494,18 +600,19 @@ make_gene_table <- function(pid, ct) {
       if (lfc > 0.3) "red" else if (lfc < -0.3) "blue" else "grey"
     } else "grey"
     padj_str <- if (is.na(padj)) "NA" else format(padj, digits = 2, scientific = TRUE)
+    pval_str <- if (is.na(pval)) "NA" else format(pval, digits = 2, scientific = TRUE)
     lfc_str  <- if (is.na(lfc)) "NA" else sprintf("%+.2f", lfc)
 
     gene_rows <- c(gene_rows, sprintf(
-      '<tr%s><td>%s</td><td style="color:%s">%s</td><td>%s</td></tr>',
-      bold_span, symbol, lfc_color, lfc_str, padj_str))
+      '<tr%s><td>%s</td><td style="color:%s">%s</td><td>%s</td><td>%s</td></tr>',
+      bold_span, symbol, lfc_color, lfc_str, padj_str, pval_str))
     if (length(gene_rows) >= 20) break
   }
   if (length(gene_rows) == 0) return("")
 
   sprintf('<div class="mt-2"><small class="text-muted fw-bold">Leading-edge genes (DESeq2 padj < 0.05 shown bold):</small>
 <table class="table table-sm table-borderless small mb-0" style="font-size:11px">
-<thead><tr><th>Gene</th><th>log2FC</th><th>padj</th></tr></thead><tbody>%s</tbody></table></div>',
+<thead><tr><th>Gene</th><th>log2FC</th><th>padj</th><th>pvalue</th></tr></thead><tbody>%s</tbody></table></div>',
     paste(gene_rows, collapse = "\n"))
 }
 
@@ -793,6 +900,71 @@ if (nrow(cluster_prof) > 0) {
   }
 }
 
+# --- Volcano Plotly data (for interactive viewer) ---
+volcano_json <- "{}"
+volcano_deg_tbl <- "{}"
+volcano_select_opts <- ""
+set.seed(42)
+if (file.exists(cinfo_path) && nrow(cinfo) > 0) {
+  volcano_data <- list()
+  volcano_tables <- list()
+  deg_cutoff <- 2000   # top N DEGs per contrast
+  bg_n <- 500          # random non-DEGs for visual context
+
+  for (cn in rownames(cinfo)) {
+    log2fc_col <- paste0(cn, "_log2FC")
+    padj_col   <- paste0(cn, "_padj")
+    if (!all(c(log2fc_col, padj_col) %in% names(combined))) next
+
+    df <- data.frame(
+      gene_id = combined$gene_id,
+      symbol = combined$gene_symbol,
+      log2FC = combined[[log2fc_col]],
+      padj = combined[[padj_col]],
+      stringsAsFactors = FALSE
+    )
+    df <- df[!is.na(df$padj), ]
+    df$symbol[is.na(df$symbol) | df$symbol == "--" | df$symbol == ""] <- df$gene_id[is.na(df$symbol) | df$symbol == "--" | df$symbol == ""]
+    df$is_de <- df$padj < 0.05
+    df$neg_log10_padj <- pmin(-log10(df$padj), 50)
+
+    de_df <- df[df$is_de, ]
+    de_df <- de_df[order(-abs(de_df$log2FC)), ]
+    if (nrow(de_df) > deg_cutoff) de_df <- de_df[1:deg_cutoff, ]
+    bg_df <- df[!df$is_de, ]
+    if (nrow(bg_df) > bg_n) bg_df <- bg_df[sample(nrow(bg_df), bg_n), ]
+    plot_df <- rbind(de_df, bg_df)
+
+    volcano_data[[cn]] <- list(
+      x = plot_df$log2FC,
+      y = plot_df$neg_log10_padj,
+      text = paste0(plot_df$symbol, "<br>log2FC: ", round(plot_df$log2FC, 3),
+                    "<br>padj: ", format(plot_df$padj, digits = 2, scientific = TRUE)),
+      marker = list(
+        color = ifelse(plot_df$is_de, ifelse(plot_df$log2FC > 0, "#E41A1C", "#377EB8"), "rgba(150,150,150,0.4)"),
+        size = 4
+      ),
+      type = "scattergl",
+      mode = "markers",
+      name = cn
+    )
+
+    top_de <- head(de_df, 100)
+    volcano_tables[[cn]] <- paste(
+      sapply(seq_len(nrow(top_de)), function(j) {
+        sprintf('<tr><td><b>%s</b></td><td>%+.3f</td><td>%s</td></tr>',
+                top_de$symbol[j], top_de$log2FC[j],
+                format(top_de$padj[j], digits = 2, scientific = TRUE))
+      }), collapse = "\n")
+  }
+  volcano_json <- jsonlite::toJSON(volcano_data, auto_unbox = TRUE, force = TRUE)
+  volcano_deg_tbl <- jsonlite::toJSON(volcano_tables, auto_unbox = TRUE, force = TRUE)
+  volcano_select_opts <- paste(sapply(rownames(cinfo), function(cn) {
+    sprintf('<option value="%s">%s</option>', cn, cinfo[cn, "label"])
+  }), collapse = "\n")
+  cat(sprintf("  Volcano data prepared for %d contrasts\n", length(volcano_data)))
+}
+
 # --- Velocity Plotly data ---
 velocity_bar_json <- "{}"
 velocity_box_json <- "{}"
@@ -854,41 +1026,46 @@ if (nrow(gene_activity) > 0) {
 }
 
 # --- Base64 encode Venn/UpSet and heatmap PNGs ---
+# The DESeq2 script writes these per (cell_line x treatment) tag, e.g. A549_Ad26
 venn_imgs <- list()
 heat_imgs <- list()
+nonref_trts <- setdiff(trt_ids, ref_trt)
 for (cl in cl_ids) {
-  # Try Venn first, then UpSet
-  png_path <- file.path(results_dir, "cross_temporal", paste0("venn_plot_", cl, ".png"))
-  if (!file.exists(png_path)) {
-    png_path <- file.path(results_dir, "cross_temporal", paste0("upset_plot_", cl, ".png"))
-  }
-  if (file.exists(png_path)) {
-    venn_imgs[[cl]] <- base64encode(readBin(png_path, "raw", file.info(png_path)$size))
-  }
-  # Heatmap
-  heat_path <- file.path(results_dir, "cross_temporal", paste0("gene_activity_heatmap_", cl, ".png"))
-  if (file.exists(heat_path)) {
-    heat_imgs[[cl]] <- base64encode(readBin(heat_path, "raw", file.info(heat_path)$size))
+  for (trt in nonref_trts) {
+    tag <- paste0(cl, "_", trt)
+    # Try Venn first, then UpSet
+    png_path <- file.path(results_dir, "cross_temporal", paste0("venn_plot_", tag, ".png"))
+    if (!file.exists(png_path)) {
+      png_path <- file.path(results_dir, "cross_temporal", paste0("upset_plot_", tag, ".png"))
+    }
+    if (file.exists(png_path)) {
+      venn_imgs[[tag]] <- base64encode(readBin(png_path, "raw", file.info(png_path)$size))
+    }
+    # Heatmap
+    heat_path <- file.path(results_dir, "cross_temporal", paste0("gene_activity_heatmap_", tag, ".png"))
+    if (file.exists(heat_path)) {
+      heat_imgs[[tag]] <- base64encode(readBin(heat_path, "raw", file.info(heat_path)$size))
+    }
   }
 }
 
 # --- Build overlay images HTML ---
 overlap_html <- ""
 if (length(venn_imgs) > 0) {
-  for (cl in names(venn_imgs)) {
+  for (tag in names(venn_imgs)) {
     overlap_html <- paste0(overlap_html,
       sprintf('<div class="col-md-6 mb-3"><h6>%s</h6>
         <img src="data:image/png;base64,%s" class="img-fluid border" style="max-width:500px" alt="Venn %s"></div>',
-        cl, venn_imgs[[cl]], cl))
+        tag, venn_imgs[[tag]], tag))
   }
 }
 heat_html <- ""
 if (length(heat_imgs) > 0) {
-  for (cl in names(heat_imgs)) {
+  for (tag in names(heat_imgs)) {
     heat_html <- paste0(heat_html,
       sprintf('<div class="col-md-6 mb-3"><h6>%s</h6>
         <img src="data:image/png;base64,%s" class="img-fluid border" style="max-width:500px" alt="Heatmap %s"></div>',
-        cl, heat_imgs[[cl]], cl))
+        tag, heat_imgs[[tag]], tag))
   }
 }
 
@@ -1163,9 +1340,9 @@ body_html <- as.character(tags$body(
         tags$div(class = "col-12 text-center",
           tags$h3("RNA-seq Pathway Analysis — Interactive Report"),
           tags$p(class = "text-muted",
-            sprintf("%s cell lines | %s treatment | %d genes | %d enriched KEGG pathways",
+            sprintf("%s cell lines | treatments: %s | %d genes | %d enriched KEGG pathways",
                     paste(cl_ids, collapse=" & "),
-                    design$factors$treatment$label,
+                    paste(trt_ids, collapse=", "),
                     nrow(combined), nrow(pwy_stats)))
         )
       ),
@@ -1199,11 +1376,17 @@ body_html <- as.character(tags$body(
           tags$button(class = "nav-link active", id = "tab-overview", `data-bs-toggle` = "tab",
                       `data-bs-target` = "#overview", type = "button", "Overview")),
         tags$li(class = "nav-item",
+          tags$button(class = "nav-link", id = "tab-enrichment", `data-bs-toggle` = "tab",
+                      `data-bs-target` = "#enrichment", type = "button", "Gene-set Enrichment")),
+        tags$li(class = "nav-item",
           tags$button(class = "nav-link", id = "tab-pathways", `data-bs-toggle` = "tab",
-                      `data-bs-target` = "#pathways", type = "button", "Pathway Browser")),
+                      `data-bs-target` = "#pathways", type = "button", "KEGG Pathview")),
         tags$li(class = "nav-item",
           tags$button(class = "nav-link", id = "tab-temporal", `data-bs-toggle` = "tab",
                       `data-bs-target` = "#temporal", type = "button", "Temporal Kinetics")),
+        tags$li(class = "nav-item",
+          tags$button(class = "nav-link", id = "tab-volcano", `data-bs-toggle` = "tab",
+                      `data-bs-target` = "#volcano", type = "button", "Volcano Viewer")),
         if (has_cross_temporal) tags$li(class = "nav-item",
           tags$button(class = "nav-link", id = "tab-divergence", `data-bs-toggle` = "tab",
                       `data-bs-target` = "#divergence", type = "button", "Cell Line Divergence"))
@@ -1215,7 +1398,7 @@ body_html <- as.character(tags$body(
         tags$div(class = "tab-pane fade show active", id = "overview",
           tags$div(class = "row",
             tags$div(class = "col-md-8",
-              tags$h5("GSEA Enrichment (click a dot to jump to pathway)"),
+              tags$h5("KEGG GSEA overview (click a dot to jump to KEGG pathway card)"),
               tags$div(id = "gseaDotplot", style = "height: 600px;")
             ),
             tags$div(class = "col-md-4",
@@ -1225,7 +1408,10 @@ body_html <- as.character(tags$body(
           )
         ),
 
-        # --- PATHWAY BROWSER TAB ---
+        # --- GENE-SET ENRICHMENT TAB ---
+        HTML(enrichment_tab_html),
+
+        # --- KEGG PATHVIEW TAB ---
         tags$div(class = "tab-pane fade", id = "pathways",
           # Filter bar
           tags$div(class = "filter-bar",
@@ -1267,6 +1453,32 @@ body_html <- as.character(tags$body(
         ),
         # Temporal Kinetics tab
         HTML(temporal_tab),
+        # Volcano Viewer tab
+        HTML(sprintf('<div class="tab-pane fade" id="volcano">
+          <div class="row mb-2">
+            <div class="col-md-4">
+              <label class="form-label fw-bold">Select Contrast:</label>
+              <select id="volcanoContrast" class="form-select">%s</select>
+            </div>
+            <div class="col-md-4">
+              <small id="volcanoDEGcount" class="text-muted"></small>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col-md-7">
+              <div id="volcanoPlotly" style="height:550px"></div>
+            </div>
+            <div class="col-md-5">
+              <h6>Top DEGs</h6>
+              <div style="max-height:520px;overflow-y:auto">
+                <table class="table table-sm table-hover small" style="font-size:11px">
+                  <thead><tr><th>Gene</th><th>log2FC</th><th>padj</th></tr></thead>
+                  <tbody id="volcanoDEGtable"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>', volcano_select_opts)),
         # Cell Line Divergence tab
         HTML(cross_divergence_tab)
       )
@@ -1365,9 +1577,57 @@ document.getElementById("gseaDotplot").on("plotly_click", function(data) {
     }, 300);
   }
 });
+
+// Volcano viewer
+var volcanoData = %s;
+var volcanoTables = %s;
+var volcanoRendered = false;
+
+$("#volcanoContrast").on("change", function() {
+  var cn = $(this).val();
+  if (!cn || !volcanoData[cn]) return;
+  var data = [volcanoData[cn]];
+  var layout = {
+    title: cn,
+    xaxis: { title: "log2 Fold Change", zeroline: true, zerolinecolor: "#999" },
+    yaxis: { title: "-log10(adj p-value)" },
+    showlegend: false,
+    margin: { l: 60, r: 20, t: 40, b: 50 },
+    shapes: [
+      { type: "line", x0: -1, x1: -1, y0: 0, y1: 1, yref: "paper",
+        line: { color: "grey", dash: "dot", width: 1 } },
+      { type: "line", x0: 1, x1: 1, y0: 0, y1: 1, yref: "paper",
+        line: { color: "grey", dash: "dot", width: 1 } },
+      { type: "line", x0: null, x1: null, y0: -Math.log10(0.05), y1: -Math.log10(0.05),
+        xref: "paper", line: { color: "blue", dash: "dash", width: 1 } }
+    ]
+  };
+  if (volcanoRendered) {
+    Plotly.react("volcanoPlotly", data, layout);
+  } else {
+    volcanoRendered = true;
+    Plotly.newPlot("volcanoPlotly", data, layout);
+  }
+  if (volcanoTables[cn]) {
+    $("#volcanoDEGtable").html(volcanoTables[cn]);
+  } else {
+    $("#volcanoDEGtable").html("");
+  }
+});
+
+document.getElementById("tab-volcano").addEventListener("shown.bs.tab", function() {
+  if (!$("#volcanoContrast").val()) {
+    var firstOpt = $("#volcanoContrast option").first().val();
+    if (firstOpt) $("#volcanoContrast").val(firstOpt).trigger("change");
+  } else {
+    $("#volcanoContrast").trigger("change");
+  }
+});
 </script>',
       jsonlite::toJSON(unname(dotplot_json), auto_unbox = TRUE, force = TRUE),
-      jsonlite::toJSON(ct_summary_json, auto_unbox = TRUE, force = TRUE)
+      jsonlite::toJSON(ct_summary_json, auto_unbox = TRUE, force = TRUE),
+      volcano_json,
+      volcano_deg_tbl
     )),
     # Temporal analysis JavaScript
     if (has_temporal) HTML(sprintf('<script>

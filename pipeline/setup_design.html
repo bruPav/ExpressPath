@@ -52,7 +52,7 @@ tr.unmatched select { border-color: #dc2626; }
     <div class="row">
       <div class="field">
         <label>Cell lines (comma-separated)</label>
-        <input type="text" id="cellLines" value="A549, E6" placeholder="e.g. HeLa, MCF7" oninput="populateRefSelects()">
+        <input type="text" id="cellLines" value="A549" placeholder="e.g. HeLa, MCF7" oninput="populateRefSelects()">
       </div>
       <div class="field">
         <label>Time points (comma-separated)</label>
@@ -327,6 +327,39 @@ document.addEventListener('change', function(e) {
   if (e.target.classList.contains('col-select')) updateValidation();
 });
 
+function uniqueShorts(names) {
+  const map = {};
+  const used = new Set();
+  names.forEach(name => {
+    const candidates = [];
+    candidates.push(String(name).charAt(0).toUpperCase());
+    if (/[-_\s]/.test(name)) {
+      candidates.push(name.split(/[-_\s]+/).map(p => p.charAt(0).toUpperCase()).join(''));
+    }
+    for (let i = 1; i < name.length; i++) {
+      candidates.push(name.slice(0, i + 1).toUpperCase());
+    }
+    for (const c of candidates) {
+      const clean = c.replace(/[^A-Z0-9]/g, '');
+      if (clean && !used.has(clean)) {
+        map[name] = clean;
+        used.add(clean);
+        return;
+      }
+    }
+    let k = 1;
+    while (used.has(String(k))) k++;
+    map[name] = String(k);
+    used.add(String(k));
+  });
+  return map;
+}
+
+function timeShort(name) {
+  const num = String(name).match(/\d+/);
+  return num ? num[0] : name.charAt(0).toUpperCase();
+}
+
 function updateValidation() {
   const d = getDesign();
   const selects = document.querySelectorAll('.col-select');
@@ -360,6 +393,10 @@ function updateValidation() {
     if (count > 1) duplicates.push(col);
   }
 
+  const mockStatus = {};
+  for (const cl of d.cellLines) {
+    mockStatus[cl] = trtSeen[cl + '_' + d.refTreatment];
+  }
   const noMock = d.cellLines.filter(cl => !mockStatus[cl]);
 
   const div = document.getElementById('validation');
@@ -451,19 +488,23 @@ function downloadDesign() {
 
   const refTrt = d.refTreatment || d.treatments[0];
 
-  const clList = d.cellLines.map(c => {
-    return {id: c, short: c.includes('-') ? c.split('-').map(p => p[0].toUpperCase()).join('') : c[0].toUpperCase()};
+  const clShortMap = uniqueShorts(d.cellLines);
+  const tpShortMap = {};
+  const usedTpShorts = new Set();
+  d.timePoints.forEach((t, i) => {
+    let s = timeShort(t);
+    if (usedTpShorts.has(s)) {
+      const fallback = uniqueShorts([t])[t];
+      s = fallback;
+    }
+    usedTpShorts.add(s);
+    tpShortMap[t] = s;
   });
+  const trtShortMap = uniqueShorts(d.treatments);
 
-  const tpList = d.timePoints.map((t, i) => {
-    const s = t[0];
-    return {id: t, label: t, short: s, temporal_order: i + 1};
-  });
-
-  const trtList = d.treatments.map(t => {
-    const s = t[0].toUpperCase();
-    return {id: t, label: t, short: s};
-  });
+  const clList = d.cellLines.map(c => ({id: c, short: clShortMap[c]}));
+  const tpList = d.timePoints.map((t, i) => ({id: t, label: t, short: tpShortMap[t], temporal_order: i + 1}));
+  const trtList = d.treatments.map(t => ({id: t, label: t, short: trtShortMap[t]}));
 
   const design = {
     source_tsv: tsvFileName || 'your_rnaseq_data.tsv',
